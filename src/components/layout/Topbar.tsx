@@ -29,13 +29,29 @@ const roleStyles: Record<Role, string> = {
   VIEWER: "bg-slate-200 text-slate-700",
 };
 
+const statusStyles: Record<string, string> = {
+  Working: "bg-emerald-50 text-emerald-700",
+  Break: "bg-amber-50 text-amber-700",
+  Lunch: "bg-sky-50 text-sky-700",
+  Off: "bg-slate-200 text-slate-700",
+};
+
+const formatDuration = (valueMs: number) => {
+  const totalSeconds = Math.max(0, Math.floor(valueMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+};
+
 const TopbarControls = ({ user }: TopbarProps) => {
-  const { users, setUserById } = useSession();
+  const { users, setUserById, logout } = useSession();
   const repo = useMemo(() => getOpsRepo(), []);
   const [punches, setPunches] = useState<TimePunch[]>([]);
   const [selectedType, setSelectedType] = useState<TimePunchType | "">("");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nowTs, setNowTs] = useState(() => Date.now());
 
   const punchOrder: Array<{ type: TimePunchType; label: string }> = [
     { type: TimePunchType.ENTRY, label: "Entrada" },
@@ -59,12 +75,79 @@ const TopbarControls = ({ user }: TopbarProps) => {
     void loadPunches();
   }, [repo]);
 
+  useEffect(() => {
+    const interval = setInterval(() => setNowTs(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   const userPunches = useMemo(
     () =>
       punches.filter(
         (item) => item.userId === user.id && item.occurredAt.split("T")[0] === todayKey,
       ),
     [punches, todayKey, user.id],
+  );
+
+  const sortedPunches = useMemo(
+    () =>
+      [...userPunches].sort(
+        (a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime(),
+      ),
+    [userPunches],
+  );
+
+  const timeTotals = useMemo(() => {
+    let workingMs = 0;
+    let breakMs = 0;
+    let lunchMs = 0;
+
+    const addSpan = (from: number, to: number, bucket: "working" | "break" | "lunch") => {
+      const delta = Math.max(0, to - from);
+      if (bucket === "working") workingMs += delta;
+      if (bucket === "break") breakMs += delta;
+      if (bucket === "lunch") lunchMs += delta;
+    };
+
+    const bucketForPunch = (type: TimePunchType) => {
+      if (type === TimePunchType.LUNCH_OUT) return "lunch";
+      if (type === TimePunchType.BREAK1_START || type === TimePunchType.BREAK2_START) return "break";
+      if (type === TimePunchType.EXIT) return "off";
+      return "working";
+    };
+
+    for (let i = 0; i < sortedPunches.length; i += 1) {
+      const current = sortedPunches[i];
+      const next = sortedPunches[i + 1];
+      const start = new Date(current.occurredAt).getTime();
+      const end = next ? new Date(next.occurredAt).getTime() : nowTs;
+      const bucket = bucketForPunch(current.type);
+      if (bucket === "off") {
+        break;
+      }
+      addSpan(start, end, bucket as "working" | "break" | "lunch");
+    }
+
+    return { workingMs, breakMs, lunchMs };
+  }, [nowTs, sortedPunches]);
+
+  const currentStatus = useMemo(() => {
+    const last = sortedPunches[sortedPunches.length - 1];
+    if (!last) return "Off";
+    if (last.type === TimePunchType.EXIT) return "Off";
+    if (last.type === TimePunchType.LUNCH_OUT) return "Lunch";
+    if (last.type === TimePunchType.BREAK1_START || last.type === TimePunchType.BREAK2_START) {
+      return "Break";
+    }
+    return "Working";
+  }, [sortedPunches]);
+
+  const hasEntry = useMemo(
+    () => userPunches.some((item) => item.type === TimePunchType.ENTRY),
+    [userPunches],
+  );
+  const hasExit = useMemo(
+    () => userPunches.some((item) => item.type === TimePunchType.EXIT),
+    [userPunches],
   );
 
   const nextPunch = useMemo(() => {
@@ -120,6 +203,14 @@ const TopbarControls = ({ user }: TopbarProps) => {
         </Button>
         {error ? <span className="text-xs text-rose-600">{error}</span> : null}
       </div>
+      <div className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[currentStatus]}`}>
+        {currentStatus}
+      </div>
+      <div className="hidden items-center gap-3 text-xs text-slate-600 md:flex">
+        <span>Working: {formatDuration(timeTotals.workingMs)}</span>
+        <span>Break: {formatDuration(timeTotals.breakMs)}</span>
+        <span>Lunch: {formatDuration(timeTotals.lunchMs)}</span>
+      </div>
       <div className="text-right">
         <div className="font-medium text-slate-900">{user.name}</div>
         <div className="text-xs uppercase text-slate-500">{user.email}</div>
@@ -127,17 +218,28 @@ const TopbarControls = ({ user }: TopbarProps) => {
       <Badge className={`px-3 py-1 text-xs font-semibold ${roleStyles[user.role]}`}>
         {user.role === "VIEWER" ? "VIEWER · Solo lectura" : user.role}
       </Badge>
-      <select
-        className="rounded-md border border-slate-300 px-3 py-1.5 text-xs text-slate-900"
-        value={user.id}
-        onChange={(event) => setUserById(event.target.value)}
+      {user.role === Role.ADMIN ? (
+        <select
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-xs text-slate-900"
+          value={user.id}
+          onChange={(event) => setUserById(event.target.value)}
+        >
+          {users.map((entry) => (
+            <option key={entry.id} value={entry.id}>
+              {entry.name} ({entry.role})
+            </option>
+          ))}
+        </select>
+      ) : null}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={logout}
+        disabled={!hasExit}
+        title={!hasExit ? "Debes marcar la salida del shift para cerrar sesion." : ""}
       >
-        {users.map((entry) => (
-          <option key={entry.id} value={entry.id}>
-            {entry.name} ({entry.role})
-          </option>
-        ))}
-      </select>
+        Salir
+      </Button>
     </div>
   );
 };

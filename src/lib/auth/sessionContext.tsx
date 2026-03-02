@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { currentUser as defaultUser, users as defaultUsers } from "./mockSession";
 import type { User } from "../types/ops";
@@ -10,6 +10,10 @@ interface SessionContextValue {
   setUserById: (userId: string) => void;
   users: User[];
   updateUserRole: (userId: string, role: User["role"]) => void;
+  isAuthenticated: boolean;
+  isReady: boolean;
+  login: (userId: string) => void;
+  logout: () => void;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -21,6 +25,20 @@ interface SessionProviderProps {
 export const SessionProvider = ({ children }: SessionProviderProps) => {
   const [user, setUser] = useState<User>(defaultUser);
   const [users, setUsers] = useState<User[]>(defaultUsers);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    const storedUserId = typeof window !== "undefined" ? localStorage.getItem("opsUserId") : null;
+    if (storedUserId) {
+      const nextUser = defaultUsers.find((entry) => entry.id === storedUserId);
+      if (nextUser) {
+        setUser(nextUser);
+        setIsAuthenticated(true);
+      }
+    }
+    setIsReady(true);
+  }, []);
 
   const setUserById = (userId: string) => {
     const nextUser = users.find((entry) => entry.id === userId);
@@ -38,9 +56,38 @@ export const SessionProvider = ({ children }: SessionProviderProps) => {
     }
   };
 
+  const login = (userId: string) => {
+    const nextUser = users.find((entry) => entry.id === userId);
+    if (!nextUser) {
+      return;
+    }
+    setUser(nextUser);
+    setIsAuthenticated(true);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("opsUserId", nextUser.id);
+    }
+  };
+
+  const logout = () => {
+    setIsAuthenticated(false);
+    setUser(defaultUser);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("opsUserId");
+    }
+  };
+
   const value = useMemo(
-    () => ({ user, setUserById, users, updateUserRole }),
-    [user, users],
+    () => ({
+      user,
+      setUserById,
+      users,
+      updateUserRole,
+      isAuthenticated,
+      isReady,
+      login,
+      logout,
+    }),
+    [user, users, isAuthenticated, isReady],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

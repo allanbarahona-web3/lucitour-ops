@@ -18,6 +18,20 @@ const navItems = [
     label: "Mi Cola",
     roles: ["ADMIN", "AGENT", "SUPERVISOR", "VIEWER"] as Role[],
   },
+  {
+    href: "/time-tracking",
+    label: "Marcaje",
+    roles: [
+      "ADMIN",
+      "AGENT",
+      "SUPERVISOR",
+      "ACCOUNTING",
+      "CONTRACTS",
+      "QUOTES",
+      "BILLING",
+      "VIEWER",
+    ] as Role[],
+  },
   { href: "/leads", label: "Leads", roles: ["ADMIN", "AGENT", "SUPERVISOR"] as Role[] },
   { href: "/contracts", label: "Contratos", roles: ["ADMIN", "CONTRACTS"] as Role[] },
   {

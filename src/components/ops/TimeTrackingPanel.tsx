@@ -41,9 +41,15 @@ interface TimeTrackingPanelProps {
   title: string;
   helper?: string;
   userScope?: "agents" | "all";
+  restrictToCurrentUser?: boolean;
 }
 
-export const TimeTrackingPanel = ({ title, helper, userScope = "agents" }: TimeTrackingPanelProps) => {
+export const TimeTrackingPanel = ({
+  title,
+  helper,
+  userScope = "agents",
+  restrictToCurrentUser = false,
+}: TimeTrackingPanelProps) => {
   const repo = useMemo(() => getOpsRepo(), []);
   const { users, user } = useSession();
   const [selectedDate, setSelectedDate] = useState(dateToKey(new Date()));
@@ -57,11 +63,14 @@ export const TimeTrackingPanel = ({ title, helper, userScope = "agents" }: TimeT
   const isAdmin = user.role === Role.ADMIN;
 
   const selectableUsers = useMemo(() => {
+    if (restrictToCurrentUser) {
+      return [user];
+    }
     if (userScope === "all") {
       return users;
     }
     return users.filter((entry) => entry.role === Role.AGENT || entry.role === Role.SUPERVISOR);
-  }, [userScope, users]);
+  }, [restrictToCurrentUser, user, userScope, users]);
 
   useEffect(() => {
     if (!selectableUsers.some((entry) => entry.id === selectedUserId)) {
@@ -167,6 +176,7 @@ export const TimeTrackingPanel = ({ title, helper, userScope = "agents" }: TimeT
             className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900"
             value={selectedUserId}
             onChange={(event) => setSelectedUserId(event.target.value)}
+            disabled={restrictToCurrentUser}
           >
             {selectableUsers.map((entry) => (
               <option key={entry.id} value={entry.id}>
