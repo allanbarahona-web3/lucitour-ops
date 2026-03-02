@@ -1,0 +1,86 @@
+import type {
+  CatalogItem,
+  CatalogName,
+  ContractModificationRequest,
+  CreateContractModificationInput,
+  CreateTripInput,
+  CreateLeadInput,
+  CreateTripMemberInput,
+  CreateHolidayDateInput,
+  CreatePayrollDeductionInput,
+  CreatePayrollPayslipInput,
+  CreateTimePunchInput,
+  HolidayDate,
+  Lead,
+  PayrollDeduction,
+  PayrollGlobalConfig,
+  PayrollPayslip,
+  PayrollRoleConfig,
+  Trip,
+  TripMember,
+  TimePunch,
+  UpdatePayrollGlobalConfig,
+  UpdatePayrollRoleConfig,
+  UpdateContractModificationPatch,
+  UpdateCatalogItemPatch,
+  UpdateLeadPatch,
+  UpdateTripMemberPatch,
+} from "../types/ops";
+import { MockOpsRepo } from "./mockOpsRepo";
+
+export interface IOpsRepo {
+  listTrips(): Promise<Trip[]>;
+  getTrip(id: string): Promise<Trip | null>;
+  listTripMembers(tripId: string): Promise<TripMember[]>;
+  listContractsQueue(): Promise<TripMember[]>;
+  listContractModifications(): Promise<ContractModificationRequest[]>;
+  listTimePunches(): Promise<TimePunch[]>;
+  listPayrollRoleConfigs(): Promise<PayrollRoleConfig[]>;
+  updatePayrollRoleConfig(config: UpdatePayrollRoleConfig): Promise<PayrollRoleConfig>;
+  getPayrollGlobalConfig(): Promise<PayrollGlobalConfig>;
+  updatePayrollGlobalConfig(config: UpdatePayrollGlobalConfig): Promise<PayrollGlobalConfig>;
+  listHolidayDates(): Promise<HolidayDate[]>;
+  addHolidayDate(input: CreateHolidayDateInput): Promise<HolidayDate>;
+  deleteHolidayDate(id: string): Promise<boolean>;
+  listPayrollDeductions(): Promise<PayrollDeduction[]>;
+  addPayrollDeduction(input: CreatePayrollDeductionInput): Promise<PayrollDeduction>;
+  deletePayrollDeduction(id: string): Promise<boolean>;
+  listPayrollPayslips(): Promise<PayrollPayslip[]>;
+  createPayrollPayslip(input: CreatePayrollPayslipInput): Promise<PayrollPayslip>;
+  updateTripMember(
+    tripId: string,
+    memberId: string,
+    patch: UpdateTripMemberPatch,
+  ): Promise<TripMember | null>;
+  createTrip(input: CreateTripInput): Promise<Trip>;
+  createTripMember(tripId: string, input: CreateTripMemberInput): Promise<TripMember>;
+  createContractModification(
+    input: CreateContractModificationInput,
+  ): Promise<ContractModificationRequest>;
+  createTimePunch(input: CreateTimePunchInput, options?: { override?: boolean }): Promise<TimePunch>;
+  updateContractModification(
+    requestId: string,
+    patch: UpdateContractModificationPatch,
+  ): Promise<ContractModificationRequest | null>;
+  listLeads(): Promise<Lead[]>;
+  createLead(input: CreateLeadInput): Promise<Lead>;
+  updateLead(leadId: string, patch: UpdateLeadPatch): Promise<Lead | null>;
+  listCatalog(catalogName: CatalogName): Promise<CatalogItem[]>;
+  addCatalogItem(catalogName: CatalogName, name: string): Promise<CatalogItem>;
+  updateCatalogItem(
+    catalogName: CatalogName,
+    id: string,
+    patch: UpdateCatalogItemPatch,
+  ): Promise<CatalogItem | null>;
+  deleteCatalogItem(catalogName: CatalogName, id: string): Promise<boolean>;
+  deriveQueue(currentUserId: string): Promise<TripMember[]>;
+}
+
+let cachedRepo: IOpsRepo | null = null;
+
+export const getOpsRepo = (): IOpsRepo => {
+  if (!cachedRepo) {
+    cachedRepo = new MockOpsRepo();
+  }
+  return cachedRepo;
+};
