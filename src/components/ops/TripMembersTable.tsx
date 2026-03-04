@@ -207,10 +207,20 @@ export const TripMembersTable = ({
 
   useEffect(() => {
     const focusId = searchParams.get("focus");
+    const requestedTab = searchParams.get("tab");
+    if (requestedTab === "sent") {
+      setAgentTab("sent");
+    } else if (requestedTab === "active") {
+      setAgentTab("active");
+    }
     if (!focusId || members.length === 0) {
       return;
     }
 
+    const targetMember = members.find((member) => member.id === focusId);
+    if (targetMember && targetMember.contractsStatus === ContractsStatus.SENT) {
+      setAgentTab("sent");
+    }
     const target = rowRefs.current[focusId];
     if (target) {
       target.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -637,19 +647,29 @@ export const TripMembersTable = ({
           member.docFlags[doc.key as keyof typeof member.docFlags] &&
           getDocsByType(member, doc.type).length > 0,
       }));
+    const step5Checks = [
+      {
+        label: "Comprobante pago inicial",
+        ok:
+          member.docFlags.paymentProof &&
+          getDocsByType(member, "PAYMENT_PROOF").length > 0,
+      },
+    ];
 
     const step1 = buildProgress(step1Checks);
     const step2 = buildProgress(step2Checks);
     const step3 = buildProgress(step3Checks);
     const step4 = buildProgress(step4Checks);
+    const step5 = buildProgress(step5Checks);
     const overall = buildProgress([
       ...step1Checks,
       ...step2Checks,
       ...step3Checks,
       ...step4Checks,
+      ...step5Checks,
     ]);
 
-    return { step1, step2, step3, step4, overall };
+    return { step1, step2, step3, step4, step5, overall };
   };
 
   const filteredMembers = useMemo(() => {
@@ -776,6 +796,7 @@ export const TripMembersTable = ({
             const step2Locked = isBlockLocked(member.id, "step2");
             const step3Locked = isBlockLocked(member.id, "step3");
             const step4Locked = isBlockLocked(member.id, "step4");
+            const step5Locked = isBlockLocked(member.id, "step5");
             const destinationLabel = `${tripName} · ${tripDateFrom} - ${tripDateTo}`;
             const lockedClass = "pointer-events-none opacity-70";
             return (
@@ -1661,9 +1682,119 @@ export const TripMembersTable = ({
                         </div>
 
                         <div className="rounded-md border border-slate-200 bg-white p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] text-white">5</span>
+                              <span className="text-emerald-700">Paso 5 · Pago inicial</span>
+                            </div>
+                            {step5Locked ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setBlockLock(member.id, "step5", false)}
+                              >
+                                Editar
+                              </Button>
+                            ) : (
+                              <Button size="sm" onClick={() => void saveBlock(member.id, "step5")}>
+                                Guardar
+                              </Button>
+                            )}
+                          </div>
+                          <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                            <span>Completitud</span>
+                            <span className={progress.step5.percent === 100 ? "text-emerald-600" : ""}>
+                              {progress.step5.percent}%
+                            </span>
+                          </div>
+                          <div className="mt-1 h-1.5 w-full rounded-full bg-slate-100">
+                            <div
+                              className={`h-1.5 rounded-full ${
+                                progress.step5.percent === 100 ? "bg-emerald-500" : "bg-amber-400"
+                              }`}
+                              style={{ width: `${progress.step5.percent}%` }}
+                            />
+                          </div>
+                          <div className={`mt-3 space-y-3 ${step5Locked ? lockedClass : ""}`}>
+                            <div className="space-y-1">
+                              <div className="text-xs font-semibold text-slate-600">
+                                Comprobante de pago inicial
+                              </div>
+                              <input
+                                className={inputClassName}
+                                type="file"
+                                multiple
+                                disabled={step5Locked}
+                                onChange={(event) => {
+                                  const nextDocs = addDocuments(
+                                    member,
+                                    "PAYMENT_PROOF",
+                                    "Pago inicial",
+                                    event.target.files,
+                                  );
+                                  const hasPaymentProof = nextDocs.some(
+                                    (doc) => doc.type === "PAYMENT_PROOF",
+                                  );
+                                  if (nextDocs.length !== member.documents.length) {
+                                    scheduleUpdate(
+                                      member.id,
+                                      {
+                                        documents: nextDocs,
+                                        docFlags: {
+                                          ...member.docFlags,
+                                          paymentProof: hasPaymentProof,
+                                        },
+                                      },
+                                      `${member.id}:documents:paymentProof`,
+                                    );
+                                  }
+                                }}
+                              />
+                            </div>
+                            {getDocsByType(member, "PAYMENT_PROOF").length > 0 ? (
+                              <div className="flex flex-wrap gap-2 text-[11px] text-slate-600">
+                                {getDocsByType(member, "PAYMENT_PROOF").map((doc) => (
+                                  <span
+                                    key={doc.id}
+                                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-0.5"
+                                  >
+                                    {doc.fileName}
+                                    {!step5Locked ? (
+                                      <button
+                                        type="button"
+                                        className="text-slate-500 hover:text-slate-900"
+                                        onClick={() => {
+                                          const nextDocs = removeDocument(member, doc.id);
+                                          const hasPaymentProof = nextDocs.some(
+                                            (entry) => entry.type === "PAYMENT_PROOF",
+                                          );
+                                          scheduleUpdate(
+                                            member.id,
+                                            {
+                                              documents: nextDocs,
+                                              docFlags: {
+                                                ...member.docFlags,
+                                                paymentProof: hasPaymentProof,
+                                              },
+                                            },
+                                            `${member.id}:documents:remove:${doc.id}`,
+                                          );
+                                        }}
+                                      >
+                                        x
+                                      </button>
+                                    ) : null}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div className="rounded-md border border-slate-200 bg-white p-3">
                           <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] text-white">5</span>
-                            <span>Paso 5 · Enviar a contratos</span>
+                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] text-white">6</span>
+                            <span>Paso 6 · Enviar a contratos</span>
                           </div>
                           <div className="mt-3">
                             <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -1964,17 +2095,9 @@ export const TripMembersTable = ({
                   />
                 </td>
                 <td className="px-3 py-2">
-                  <input
-                    className={inputClassName}
-                    value={member.reservationCode}
-                    onChange={(event) =>
-                      scheduleUpdate(
-                        member.id,
-                        { reservationCode: event.target.value },
-                        `${member.id}:reservationCode`,
-                      )
-                    }
-                  />
+                  <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700">
+                    {member.reservationCode}
+                  </div>
                 </td>
                 <td className="px-3 py-2">
                   <input
@@ -2617,6 +2740,12 @@ export const TripMembersTable = ({
               { key: "idCard", label: "Cedula", type: "ID_CARD" as DocumentType, enabled: true },
               { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType, enabled: true },
               {
+                key: "paymentProof",
+                label: "Pago inicial",
+                type: "PAYMENT_PROOF" as DocumentType,
+                enabled: true,
+              },
+              {
                 key: "minorPermit",
                 label: "Permiso menor",
                 type: "MINOR_PERMIT" as DocumentType,
@@ -2659,6 +2788,7 @@ export const TripMembersTable = ({
           [
             { key: "idCard", label: "Cedula", type: "ID_CARD" as DocumentType },
             { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType },
+            { key: "paymentProof", label: "Pago inicial", type: "PAYMENT_PROOF" as DocumentType },
             { key: "minorPermit", label: "Permiso menor", type: "MINOR_PERMIT" as DocumentType },
             { key: "insurance", label: "Seguro propio", type: "INSURANCE" as DocumentType },
           ]
@@ -3028,6 +3158,26 @@ export const TripMembersTable = ({
                         </div>
                       );
                     })}
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-slate-200 bg-white p-3">
+                  <div className="text-xs font-semibold text-slate-600">Paso 5 · Pago inicial</div>
+                  <div className="mt-2 space-y-2">
+                    {getDocsByType(summaryMember, "PAYMENT_PROOF").length === 0 ? (
+                      <div className="text-xs text-slate-500">Sin comprobantes</div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {getDocsByType(summaryMember, "PAYMENT_PROOF").map((doc) => (
+                          <span
+                            key={doc.id}
+                            className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px]"
+                          >
+                            {doc.fileName}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 

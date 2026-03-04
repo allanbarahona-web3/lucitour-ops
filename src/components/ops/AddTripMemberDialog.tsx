@@ -30,7 +30,6 @@ import { AddCatalogItemDialog } from "./AddCatalogItemDialog";
 const adminSchema = z.object({
   fullName: z.string().min(2, "Nombre requerido"),
   phone: z.string().min(3, "Telefono requerido"),
-  reservationCode: z.string().min(1, "Reserva requerida"),
   identificationTypeId: z.string().min(1, "Tipo requerido"),
   identification: z.string().min(1, "Identificacion requerida"),
   seats: z.coerce.number().min(1, "Asientos requeridos"),
@@ -73,6 +72,19 @@ interface AddTripMemberDialogProps {
 const selectClassName =
   "w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900";
 
+const generateReservationCode = () => {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const months = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+  const now = new Date();
+  const month = months[now.getMonth()] ?? "MES";
+  const year = String(now.getFullYear()).slice(-2);
+  let suffix = "";
+  for (let i = 0; i < 4; i += 1) {
+    suffix += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `${month}${year}${suffix}`;
+};
+
 export const AddTripMemberDialog = ({
   tripId,
   tripName,
@@ -97,7 +109,6 @@ export const AddTripMemberDialog = ({
       fullName: "",
       phone: "",
       email: "",
-      reservationCode: "",
       identificationTypeId: "",
       identification: "",
       seats: 1,
@@ -121,7 +132,6 @@ export const AddTripMemberDialog = ({
         fullName: "",
         phone: "",
         email: "",
-        reservationCode: "",
         identificationTypeId: "",
         identification: "",
         seats: 1,
@@ -162,7 +172,7 @@ export const AddTripMemberDialog = ({
       fullName: values.fullName,
       phone: values.phone,
       email: values.email ?? "",
-      reservationCode: values.reservationCode ?? "",
+      reservationCode: generateReservationCode(),
       identificationTypeId: values.identificationTypeId,
       identification: values.identification,
       seats,
@@ -192,7 +202,13 @@ export const AddTripMemberDialog = ({
       hasMinorCompanions: false,
       hasParentalAuthority: null,
       documents: [],
-      docFlags: { idCard: false, passport: false, minorPermit: false, insurance: false },
+      docFlags: {
+        idCard: false,
+        passport: false,
+        minorPermit: false,
+        insurance: false,
+        paymentProof: false,
+      },
       isDraft: false,
       contractsStatus: ContractsStatus.NOT_SENT,
       contractsSentByUserId: null,
@@ -268,16 +284,7 @@ export const AddTripMemberDialog = ({
               </div>
             </div>
           ) : (
-          <form className="space-y-4" onSubmit={handleSubmit}>
-            {isTripClosed ? (
-              <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
-                Viaje cerrado: no se pueden agregar mas pasajeros.
-              </p>
-            ) : (
-              <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                Cupos disponibles: {maxSeatsRemaining}
-              </p>
-            )}
+            <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="fullName">Nombre completo</Label>
               <Input id="fullName" {...form.register("fullName")} />
@@ -335,13 +342,10 @@ export const AddTripMemberDialog = ({
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <Label htmlFor="reservationCode">Reserva</Label>
-                  <Input id="reservationCode" {...form.register("reservationCode")} />
-                  {form.formState.errors.reservationCode ? (
-                    <p className="text-xs text-red-600">
-                      {form.formState.errors.reservationCode.message}
-                    </p>
-                  ) : null}
+                  <div className="text-xs font-semibold text-slate-600">Reserva</div>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    Se genera automaticamente al guardar.
+                  </div>
                 </div>
               )}
             </div>

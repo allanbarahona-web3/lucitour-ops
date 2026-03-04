@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getOpsRepo } from "@/lib/data/opsRepo";
-import { useSession } from "@/lib/auth/sessionContext";
+import { Button } from "../../../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
+import { getOpsRepo } from "../../../lib/data/opsRepo";
+import { useSession } from "../../../lib/auth/sessionContext";
 import {
   ContractsStatus,
   ContractStatus,
@@ -13,7 +13,7 @@ import {
   PassportStatus,
   type Trip,
   type TripMember,
-} from "@/lib/types/ops";
+} from "../../../lib/types/ops";
 
 const groupLabels = {
   contract: "Contratos",

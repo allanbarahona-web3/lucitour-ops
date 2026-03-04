@@ -53,6 +53,29 @@ const makeId = (kind: string, counter: number) => `${ID_PREFIX}_${kind}_${counte
 
 const nowIso = () => new Date().toISOString();
 
+const makeReservationCode = () => {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const months = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+  const now = new Date();
+  const month = months[now.getMonth()] ?? "MES";
+  const year = String(now.getFullYear()).slice(-2);
+  let suffix = "";
+  for (let i = 0; i < 4; i += 1) {
+    suffix += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `${month}${year}${suffix}`;
+};
+
+const makeUniqueReservationCode = (existingCodes: Set<string>) => {
+  let attempts = 0;
+  let next = makeReservationCode();
+  while (existingCodes.has(next) && attempts < 25) {
+    next = makeReservationCode();
+    attempts += 1;
+  }
+  return next;
+};
+
 const cloneCatalogs = (items: CatalogItem[]) => items.map((item) => ({ ...item }));
 
 export class MockOpsRepo implements IOpsRepo {
@@ -121,7 +144,13 @@ export class MockOpsRepo implements IOpsRepo {
       hasMinorCompanions: false,
       hasParentalAuthority: null,
       documents: [],
-      docFlags: { idCard: false, passport: false, minorPermit: false, insurance: false },
+      docFlags: {
+        idCard: false,
+        passport: false,
+        minorPermit: false,
+        insurance: false,
+        paymentProof: false,
+      },
       isDraft: false,
       contractsStatus: ContractsStatus.NOT_SENT,
       contractsSentByUserId: null,
@@ -167,7 +196,13 @@ export class MockOpsRepo implements IOpsRepo {
       hasMinorCompanions: false,
       hasParentalAuthority: null,
       documents: [],
-      docFlags: { idCard: false, passport: false, minorPermit: false, insurance: false },
+      docFlags: {
+        idCard: false,
+        passport: false,
+        minorPermit: false,
+        insurance: false,
+        paymentProof: false,
+      },
       isDraft: false,
       contractsStatus: ContractsStatus.NOT_SENT,
       contractsSentByUserId: null,
@@ -213,7 +248,13 @@ export class MockOpsRepo implements IOpsRepo {
       hasMinorCompanions: false,
       hasParentalAuthority: null,
       documents: [],
-      docFlags: { idCard: false, passport: false, minorPermit: false, insurance: false },
+      docFlags: {
+        idCard: false,
+        passport: false,
+        minorPermit: false,
+        insurance: false,
+        paymentProof: false,
+      },
       isDraft: false,
       contractsStatus: ContractsStatus.NOT_SENT,
       contractsSentByUserId: null,
@@ -495,6 +536,7 @@ export class MockOpsRepo implements IOpsRepo {
     tripId: string,
     input: CreateTripMemberInput,
   ): Promise<TripMember> {
+    const existingCodes = new Set(this.tripMembers.map((member) => member.reservationCode));
     const member: TripMember = {
       id: makeId("member", ++this.memberCounter),
       tripId,
@@ -503,6 +545,7 @@ export class MockOpsRepo implements IOpsRepo {
       createdAt: nowIso(),
       updatedAt: nowIso(),
       ...input,
+      reservationCode: makeUniqueReservationCode(existingCodes),
     };
 
     this.tripMembers.push(member);

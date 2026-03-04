@@ -35,6 +35,18 @@ export const AppShell = ({ children }: AppShellProps) => {
   }, [isAuthenticated, isReady, router]);
 
   const canAccessRoute = (path: string, role: Role) => {
+    if (role === Role.AGENT) {
+      if (path.startsWith("/my-queue")) {
+        return true;
+      }
+      if (path === "/trips") {
+        return true;
+      }
+      if (path.startsWith("/trips/") && path !== "/trips") {
+        return true;
+      }
+      return false;
+    }
     if (path.startsWith("/admin")) {
       return role === Role.ADMIN;
     }
@@ -51,13 +63,13 @@ export const AppShell = ({ children }: AppShellProps) => {
       return role === Role.ADMIN || role === Role.BILLING || role === Role.ACCOUNTING;
     }
     if (path.startsWith("/trips")) {
-      return role === Role.ADMIN || role === Role.AGENT || role === Role.SUPERVISOR;
+      return role === Role.ADMIN || role === Role.SUPERVISOR;
     }
     if (path.startsWith("/leads")) {
-      return role === Role.ADMIN || role === Role.AGENT || role === Role.SUPERVISOR;
+      return role === Role.ADMIN || role === Role.SUPERVISOR;
     }
     if (path.startsWith("/my-queue")) {
-      return role === Role.ADMIN || role === Role.AGENT || role === Role.SUPERVISOR || role === Role.VIEWER;
+      return role === Role.ADMIN || role === Role.SUPERVISOR || role === Role.VIEWER;
     }
     if (path.startsWith("/time-tracking")) {
       return true;

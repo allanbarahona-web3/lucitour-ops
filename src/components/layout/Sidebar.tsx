@@ -21,18 +21,9 @@ const navItems = [
   {
     href: "/time-tracking",
     label: "Marcaje",
-    roles: [
-      "ADMIN",
-      "AGENT",
-      "SUPERVISOR",
-      "ACCOUNTING",
-      "CONTRACTS",
-      "QUOTES",
-      "BILLING",
-      "VIEWER",
-    ] as Role[],
+    roles: ["ADMIN"] as Role[],
   },
-  { href: "/leads", label: "Leads", roles: ["ADMIN", "AGENT", "SUPERVISOR"] as Role[] },
+  { href: "/leads", label: "Leads", roles: ["ADMIN", "SUPERVISOR"] as Role[] },
   { href: "/contracts", label: "Contratos", roles: ["ADMIN", "CONTRACTS"] as Role[] },
   {
     href: "/contracts/modifications",

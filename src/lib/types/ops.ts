@@ -113,7 +113,12 @@ export enum ContractModificationStatus {
   DONE = "DONE",
 }
 
-export type DocumentType = "ID_CARD" | "PASSPORT" | "MINOR_PERMIT" | "INSURANCE";
+export type DocumentType =
+  | "ID_CARD"
+  | "PASSPORT"
+  | "MINOR_PERMIT"
+  | "INSURANCE"
+  | "PAYMENT_PROOF";
 
 export interface DocumentUpload {
   id: string;
@@ -181,6 +186,7 @@ export interface TripMember {
     passport: boolean;
     minorPermit: boolean;
     insurance: boolean;
+    paymentProof: boolean;
   };
   isDraft: boolean;
   contractsStatus: ContractsStatus;
