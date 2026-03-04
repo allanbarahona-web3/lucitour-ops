@@ -28,6 +28,7 @@ import {
   ItineraryStatus,
   MaritalStatus,
   PassportStatus,
+  BillingStatus,
   Role,
 } from "../../lib/types/ops";
 import type { IOpsRepo } from "../../lib/data/opsRepo";
@@ -1843,6 +1844,9 @@ export const TripMembersTable = ({
                                     contractsStatus: ContractsStatus.SENT,
                                     contractsSentByUserId: currentUser.id,
                                     contractsSentAt: new Date().toISOString(),
+                                    billingStatus: BillingStatus.SENT,
+                                    billingSentByUserId: currentUser.id,
+                                    billingSentAt: new Date().toISOString(),
                                     isDraft: false,
                                   })
                                 }

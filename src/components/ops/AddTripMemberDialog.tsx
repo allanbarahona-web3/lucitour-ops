@@ -23,6 +23,8 @@ import {
   DocsStatus,
   ItineraryStatus,
   PassportStatus,
+  BillingStatus,
+  QuoteStatus,
   Role,
 } from "../../lib/types/ops";
 import { AddCatalogItemDialog } from "./AddCatalogItemDialog";
@@ -48,7 +50,7 @@ const agentSchema = z.object({
   email: z.string().min(3, "Correo requerido").email("Correo invalido"),
   identificationTypeId: z.string().min(1, "Tipo requerido"),
   identification: z.string().min(1, "Identificacion requerida"),
-  wantsReservation: z.enum(["YES", "NO"]),
+  wantsReservation: z.enum(["YES", "NO", "QUOTE"]),
   notes: z.string().optional(),
 });
 
@@ -100,6 +102,11 @@ export const AddTripMemberDialog = ({
   const [open, setOpen] = useState(false);
   const [catalogDialogOpen, setCatalogDialogOpen] = useState(false);
   const [catalogToAdd, setCatalogToAdd] = useState<CatalogName | null>(null);
+  const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
+  const [quoteLeadId, setQuoteLeadId] = useState<string | null>(null);
+  const [quoteDestination, setQuoteDestination] = useState("");
+  const [quoteMonth, setQuoteMonth] = useState("");
+  const [isSavingQuote, setIsSavingQuote] = useState(false);
   const isAdmin = currentUser.role === Role.ADMIN;
   const isAgent = currentUser.role === Role.AGENT || currentUser.role === Role.SUPERVISOR;
 
@@ -149,8 +156,8 @@ export const AddTripMemberDialog = ({
   }, [open, form, currentUser.id]);
 
   const handleSubmit = form.handleSubmit(async (values: FormValues) => {
-    const wantsReservation = isAgent ? values.wantsReservation === "YES" : true;
-    if (isAgent && !wantsReservation) {
+    const wantsReservation = isAgent ? values.wantsReservation : "YES";
+    if (isAgent && wantsReservation === "NO") {
       form.setError("wantsReservation", { message: "Usa Convertir en lead." });
       return;
     }
@@ -167,6 +174,27 @@ export const AddTripMemberDialog = ({
     }
 
     const seats = typeof values.seats === "number" ? values.seats : 1;
+
+    if (isAgent && wantsReservation === "QUOTE") {
+      const lead = await repo.createLead({
+        fullName: values.fullName,
+        identificationTypeId: values.identificationTypeId,
+        identification: values.identification,
+        phone: values.phone,
+        email: values.email ?? "",
+        wantsReservation: false,
+        notes: values.notes ?? "",
+        quoteDestination: "",
+        quoteTravelMonth: "",
+        quoteStatus: QuoteStatus.PENDING,
+      });
+      setQuoteLeadId(lead.id);
+      setQuoteDestination("");
+      setQuoteMonth("");
+      setQuoteDialogOpen(true);
+      setOpen(false);
+      return;
+    }
 
     const payload: CreateTripMemberInput = {
       fullName: values.fullName,
@@ -213,6 +241,9 @@ export const AddTripMemberDialog = ({
       contractsStatus: ContractsStatus.NOT_SENT,
       contractsSentByUserId: null,
       contractsSentAt: null,
+      billingStatus: BillingStatus.NOT_SENT,
+      billingSentByUserId: null,
+      billingSentAt: null,
       assignedToUserId: values.assignedToUserId ?? currentUser.id,
     };
 
@@ -231,8 +262,26 @@ export const AddTripMemberDialog = ({
       email: values.email ?? "",
       wantsReservation: false,
       notes: values.notes ?? "",
+      quoteDestination: "",
+      quoteTravelMonth: "",
+      quoteStatus: QuoteStatus.PENDING,
     });
     setOpen(false);
+  };
+
+  const handleSendQuote = async () => {
+    if (!quoteLeadId || !quoteDestination.trim() || !quoteMonth.trim()) {
+      return;
+    }
+    setIsSavingQuote(true);
+    await repo.updateLead(quoteLeadId, {
+      quoteDestination: quoteDestination.trim(),
+      quoteTravelMonth: quoteMonth.trim(),
+      quoteStatus: QuoteStatus.SENT,
+    });
+    setIsSavingQuote(false);
+    setQuoteDialogOpen(false);
+    setQuoteLeadId(null);
   };
 
   const makeCatalogOptions = (catalogName: CatalogName) => {
@@ -332,6 +381,16 @@ export const AddTripMemberDialog = ({
                         onChange={() => form.setValue("wantsReservation", "NO")}
                       />
                       <span>No</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="wantsReservation"
+                        className="h-4 w-4 rounded-full border-slate-300"
+                        checked={wantsReservation === "QUOTE"}
+                        onChange={() => form.setValue("wantsReservation", "QUOTE")}
+                      />
+                      <span>Cotizar</span>
                     </label>
                   </div>
                   {form.formState.errors.wantsReservation ? (
@@ -574,6 +633,41 @@ export const AddTripMemberDialog = ({
             )}
           </form>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={quoteDialogOpen} onOpenChange={setQuoteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enviar a cotizaciones</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-1">
+              <Label htmlFor="quoteDestination">Destino a cotizar</Label>
+              <Input
+                id="quoteDestination"
+                value={quoteDestination}
+                onChange={(event) => setQuoteDestination(event.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="quoteMonth">Mes a viajar</Label>
+              <Input
+                id="quoteMonth"
+                placeholder="Ej. Junio 2026"
+                value={quoteMonth}
+                onChange={(event) => setQuoteMonth(event.target.value)}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setQuoteDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void handleSendQuote()} disabled={isSavingQuote}>
+              {isSavingQuote ? "Enviando..." : "Enviar a cotizaciones"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

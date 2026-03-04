@@ -106,6 +106,21 @@ export enum ContractsStatus {
   SENT = "SENT",
 }
 
+export enum BillingStatus {
+  NOT_SENT = "NOT_SENT",
+  SENT = "SENT",
+}
+
+export enum QuoteStatus {
+  PENDING = "PENDING",
+  SENT = "SENT",
+  IN_PROGRESS = "IN_PROGRESS",
+  OFFER_SENT = "OFFER_SENT",
+  WON = "WON",
+  PAUSED = "PAUSED",
+  LOST = "LOST",
+}
+
 export type ContractModificationStep = "STEP1" | "STEP2" | "STEP3" | "STEP4";
 
 export enum ContractModificationStatus {
@@ -192,6 +207,10 @@ export interface TripMember {
   contractsStatus: ContractsStatus;
   contractsSentByUserId: string | null;
   contractsSentAt: string | null;
+  billingStatus: BillingStatus;
+  billingSentByUserId: string | null;
+  billingSentAt: string | null;
+  quoteCode?: string | null;
   enteredByUserId: string;
   assignedToUserId: string;
   createdAt: string;
@@ -246,6 +265,19 @@ export interface Lead {
   email: string;
   wantsReservation: boolean;
   notes: string;
+  quoteDestination: string;
+  quoteTravelMonth: string;
+  quoteStatus: QuoteStatus;
+  quoteCode: string;
+  quoteTakenByUserId: string | null;
+  quoteTakenAt: string | null;
+  quoteStatusUpdatedAt: string | null;
+  quoteOfferSentAt: string | null;
+  quoteWonAt: string | null;
+  quotePausedAt: string | null;
+  quoteLostAt: string | null;
+  quoteTripId: string | null;
+  quoteTripMemberId: string | null;
 }
 
 export type CatalogName =
@@ -301,8 +333,33 @@ export type CreateHolidayDateInput = Omit<HolidayDate, "id">;
 
 export type CreateLeadInput = Omit<
   Lead,
-  "id" | "createdAt" | "updatedAt" | "agentUserId"
-> & { agentUserId?: string };
+  | "id"
+  | "createdAt"
+  | "updatedAt"
+  | "agentUserId"
+  | "quoteCode"
+  | "quoteTakenByUserId"
+  | "quoteTakenAt"
+  | "quoteStatusUpdatedAt"
+  | "quoteOfferSentAt"
+  | "quoteWonAt"
+  | "quotePausedAt"
+  | "quoteLostAt"
+  | "quoteTripId"
+  | "quoteTripMemberId"
+> & {
+  agentUserId?: string;
+  quoteCode?: string;
+  quoteTakenByUserId?: string | null;
+  quoteTakenAt?: string | null;
+  quoteStatusUpdatedAt?: string | null;
+  quoteOfferSentAt?: string | null;
+  quoteWonAt?: string | null;
+  quotePausedAt?: string | null;
+  quoteLostAt?: string | null;
+  quoteTripId?: string | null;
+  quoteTripMemberId?: string | null;
+};
 
 export type UpdateLeadPatch = Partial<Omit<Lead, "id" | "createdAt">>;
 

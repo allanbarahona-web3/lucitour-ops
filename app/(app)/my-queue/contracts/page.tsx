@@ -22,17 +22,27 @@ export default function MyQueueContractsPage() {
   useEffect(() => {
     const loadRows = async () => {
       setIsLoading(true);
-      const [queueMembers, trips] = await Promise.all([
-        repo.deriveQueue(user.id),
-        repo.listTrips(),
-      ]);
+      const trips = await repo.listTrips();
       const tripMap = trips.reduce<Record<string, Trip>>((acc, trip) => {
         acc[trip.id] = trip;
         return acc;
       }, {});
-      const nextRows = queueMembers
-        .filter((member) => member.contractStatus === ContractStatus.MISSING)
-        .map((member) => ({ member, trip: tripMap[member.tripId] ?? null }));
+      const tripMembersByTrip = await Promise.all(
+        trips.map(async (trip) => ({
+          trip,
+          members: await repo.listTripMembers(trip.id),
+        })),
+      );
+      const nextRows = tripMembersByTrip
+        .flatMap(({ trip, members }) =>
+          members
+            .filter(
+              (member) =>
+                member.contractStatus === ContractStatus.SENT &&
+                member.assignedToUserId === user.id,
+            )
+            .map((member) => ({ member, trip: tripMap[member.tripId] ?? trip })),
+        );
       setRows(nextRows);
       setIsLoading(false);
     };

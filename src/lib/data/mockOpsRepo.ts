@@ -34,6 +34,8 @@ import {
   PassportStatus,
   Role,
   ContractsStatus,
+  BillingStatus,
+  QuoteStatus,
   TimePunchType,
 } from "../types/ops";
 import { currentUser } from "../auth/mockSession";
@@ -71,6 +73,29 @@ const makeUniqueReservationCode = (existingCodes: Set<string>) => {
   let next = makeReservationCode();
   while (existingCodes.has(next) && attempts < 25) {
     next = makeReservationCode();
+    attempts += 1;
+  }
+  return next;
+};
+
+const makeQuoteCode = () => {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const months = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+  const now = new Date();
+  const month = months[now.getMonth()] ?? "MES";
+  const year = String(now.getFullYear()).slice(-2);
+  let suffix = "";
+  for (let i = 0; i < 4; i += 1) {
+    suffix += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `COT${month}${year}${suffix}`;
+};
+
+const makeUniqueQuoteCode = (existingCodes: Set<string>) => {
+  let attempts = 0;
+  let next = makeQuoteCode();
+  while (existingCodes.has(next) && attempts < 25) {
+    next = makeQuoteCode();
     attempts += 1;
   }
   return next;
@@ -155,6 +180,9 @@ export class MockOpsRepo implements IOpsRepo {
       contractsStatus: ContractsStatus.NOT_SENT,
       contractsSentByUserId: null,
       contractsSentAt: null,
+      billingStatus: BillingStatus.NOT_SENT,
+      billingSentByUserId: null,
+      billingSentAt: null,
       enteredByUserId: currentUser.id,
       assignedToUserId: currentUser.id,
       createdAt: nowIso(),
@@ -207,6 +235,9 @@ export class MockOpsRepo implements IOpsRepo {
       contractsStatus: ContractsStatus.NOT_SENT,
       contractsSentByUserId: null,
       contractsSentAt: null,
+      billingStatus: BillingStatus.NOT_SENT,
+      billingSentByUserId: null,
+      billingSentAt: null,
       enteredByUserId: currentUser.id,
       assignedToUserId: currentUser.id,
       createdAt: nowIso(),
@@ -259,6 +290,9 @@ export class MockOpsRepo implements IOpsRepo {
       contractsStatus: ContractsStatus.NOT_SENT,
       contractsSentByUserId: null,
       contractsSentAt: null,
+      billingStatus: BillingStatus.NOT_SENT,
+      billingSentByUserId: null,
+      billingSentAt: null,
       enteredByUserId: currentUser.id,
       assignedToUserId: currentUser.id,
       createdAt: nowIso(),
@@ -279,6 +313,19 @@ export class MockOpsRepo implements IOpsRepo {
       email: "mario.rios@correo.com",
       wantsReservation: false,
       notes: "Interesado en mayo, quiere informacion.",
+      quoteDestination: "",
+      quoteTravelMonth: "",
+      quoteStatus: QuoteStatus.PENDING,
+      quoteCode: "",
+      quoteTakenByUserId: null,
+      quoteTakenAt: null,
+      quoteStatusUpdatedAt: null,
+      quoteOfferSentAt: null,
+      quoteWonAt: null,
+      quotePausedAt: null,
+      quoteLostAt: null,
+      quoteTripId: null,
+      quoteTripMemberId: null,
     },
   ];
 
@@ -639,13 +686,32 @@ export class MockOpsRepo implements IOpsRepo {
   }
 
   async createLead(input: CreateLeadInput): Promise<Lead> {
+    const now = nowIso();
+    const existingCodes = new Set(this.leads.map((lead) => lead.quoteCode).filter(Boolean));
     const lead: Lead = {
       id: makeId("lead", this.leads.length + 1),
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
+      createdAt: now,
+      updatedAt: now,
       agentUserId: input.agentUserId ?? currentUser.id,
       ...input,
+      quoteDestination: input.quoteDestination ?? "",
+      quoteTravelMonth: input.quoteTravelMonth ?? "",
+      quoteStatus: input.quoteStatus ?? QuoteStatus.PENDING,
+      quoteCode: input.quoteCode ?? "",
+      quoteTakenByUserId: input.quoteTakenByUserId ?? null,
+      quoteTakenAt: input.quoteTakenAt ?? null,
+      quoteStatusUpdatedAt: input.quoteStatusUpdatedAt ?? now,
+      quoteOfferSentAt: input.quoteOfferSentAt ?? null,
+      quoteWonAt: input.quoteWonAt ?? null,
+      quotePausedAt: input.quotePausedAt ?? null,
+      quoteLostAt: input.quoteLostAt ?? null,
+      quoteTripId: input.quoteTripId ?? null,
+      quoteTripMemberId: input.quoteTripMemberId ?? null,
     };
+
+    if (!lead.quoteCode && lead.quoteStatus !== QuoteStatus.PENDING) {
+      lead.quoteCode = makeUniqueQuoteCode(existingCodes);
+    }
 
     this.leads.push(lead);
     return { ...lead };
@@ -657,11 +723,39 @@ export class MockOpsRepo implements IOpsRepo {
       return null;
     }
 
+    const now = nowIso();
+    const prev = this.leads[index];
     const updated: Lead = {
-      ...this.leads[index],
+      ...prev,
       ...patch,
-      updatedAt: nowIso(),
+      updatedAt: now,
     };
+
+    if (patch.quoteStatus && patch.quoteStatus !== prev.quoteStatus) {
+      updated.quoteStatusUpdatedAt = patch.quoteStatusUpdatedAt ?? now;
+      if (patch.quoteStatus === QuoteStatus.IN_PROGRESS) {
+        updated.quoteTakenAt = patch.quoteTakenAt ?? prev.quoteTakenAt ?? now;
+        updated.quoteTakenByUserId =
+          patch.quoteTakenByUserId ?? prev.quoteTakenByUserId ?? currentUser.id;
+      }
+      if (patch.quoteStatus === QuoteStatus.OFFER_SENT) {
+        updated.quoteOfferSentAt = patch.quoteOfferSentAt ?? now;
+      }
+      if (patch.quoteStatus === QuoteStatus.WON) {
+        updated.quoteWonAt = patch.quoteWonAt ?? now;
+      }
+      if (patch.quoteStatus === QuoteStatus.PAUSED) {
+        updated.quotePausedAt = patch.quotePausedAt ?? now;
+      }
+      if (patch.quoteStatus === QuoteStatus.LOST) {
+        updated.quoteLostAt = patch.quoteLostAt ?? now;
+      }
+    }
+
+    if (!updated.quoteCode && updated.quoteStatus !== QuoteStatus.PENDING) {
+      const existingCodes = new Set(this.leads.map((lead) => lead.quoteCode).filter(Boolean));
+      updated.quoteCode = makeUniqueQuoteCode(existingCodes);
+    }
 
     this.leads[index] = updated;
     return { ...updated };

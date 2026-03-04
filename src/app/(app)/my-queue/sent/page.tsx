@@ -87,8 +87,8 @@ export default function MyQueueSentPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Enviados a contratos</h1>
-          <p className="text-sm text-slate-600">Historial de envios realizados.</p>
+          <h1 className="text-2xl font-semibold text-slate-900">Contratos en revision</h1>
+          <p className="text-sm text-slate-600">Envios a contratos pendientes de revision.</p>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <input

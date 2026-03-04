@@ -15,7 +15,7 @@ const navItems = [
   },
   {
     href: "/my-queue",
-    label: "Mi Cola",
+    label: "Dashboard Agentes",
     roles: ["ADMIN", "AGENT", "SUPERVISOR", "VIEWER"] as Role[],
   },
   {

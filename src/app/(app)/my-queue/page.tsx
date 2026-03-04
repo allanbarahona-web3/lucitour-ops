@@ -11,12 +11,13 @@ import {
   ContractStatus,
   DocsStatus,
   PassportStatus,
+  QuoteStatus,
   type Trip,
   type TripMember,
 } from "../../../lib/types/ops";
 
 const groupLabels = {
-  contract: "Contratos",
+  contract: "Contratos Procesados",
   identification: "Identificaciones",
 } as const;
 
@@ -55,14 +56,17 @@ export default function MyQueuePage() {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [tripMap, setTripMap] = useState<Record<string, Trip>>({});
   const [sentItems, setSentItems] = useState<SentItem[]>([]);
+  const [contractItems, setContractItems] = useState<TripMember[]>([]);
+  const [quoteCount, setQuoteCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const loadQueue = async () => {
       setIsLoading(true);
-      const [queueMembers, trips] = await Promise.all([
+      const [queueMembers, trips, leads] = await Promise.all([
         repo.deriveQueue(user.id),
         repo.listTrips(),
+        repo.listLeads(),
       ]);
 
       const nextTripMap = trips.reduce<Record<string, Trip>>((acc, trip) => {
@@ -80,6 +84,14 @@ export default function MyQueuePage() {
           members: await repo.listTripMembers(trip.id),
         })),
       );
+      const nextContractItems = tripMembersByTrip
+        .flatMap(({ members }) => members)
+        .filter(
+          (member) =>
+            member.contractStatus === ContractStatus.SENT &&
+            member.assignedToUserId === user.id,
+        );
+
       const nextSentItems = tripMembersByTrip
         .flatMap(({ trip, members }) =>
           members
@@ -94,9 +106,15 @@ export default function MyQueuePage() {
           (b.member.contractsSentAt ?? "").localeCompare(a.member.contractsSentAt ?? ""),
         );
 
+      const nextQuoteCount = leads.filter(
+        (lead) => lead.agentUserId === user.id && lead.quoteStatus !== QuoteStatus.PENDING,
+      ).length;
+
       setTripMap(nextTripMap);
       setItems(nextItems);
       setSentItems(nextSentItems);
+      setContractItems(nextContractItems);
+      setQuoteCount(nextQuoteCount);
       setIsLoading(false);
     };
 
@@ -118,7 +136,7 @@ export default function MyQueuePage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Mi cola</h1>
+          <h1 className="text-2xl font-semibold text-slate-900">Dashboard Agentes</h1>
           <p className="text-sm text-slate-600">Pendientes asignados a ti.</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
@@ -129,12 +147,12 @@ export default function MyQueuePage() {
       {isLoading ? (
         <p className="text-sm text-slate-600">Cargando pendientes...</p>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {([
             {
               key: "contract" as QueueGroupKey,
               href: "/my-queue/contracts",
-              count: grouped.contract.length,
+              count: contractItems.length,
             },
             {
               key: "identification" as QueueGroupKey,
@@ -146,12 +164,21 @@ export default function MyQueuePage() {
               href: "/my-queue/sent",
               count: sentItems.length,
             },
+            {
+              key: "quotes" as const,
+              href: "/my-queue/quotes",
+              count: quoteCount,
+            },
           ]).map((item) => (
             <Link key={item.href} href={item.href} className="block">
               <Card className="h-full transition hover:border-slate-300">
                 <CardHeader>
                   <CardTitle>
-                    {item.key === "sent" ? "Enviados a contratos" : groupLabels[item.key]}
+                    {item.key === "sent"
+                      ? "Contratos en revision"
+                      : item.key === "quotes"
+                        ? "Cotizaciones enviadas"
+                        : groupLabels[item.key]}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
