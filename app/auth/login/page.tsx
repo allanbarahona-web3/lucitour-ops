@@ -26,7 +26,11 @@ export default function LoginPage() {
       return;
     }
     setError(null);
-    login(selectedUserId);
+    const ok = login(selectedUserId);
+    if (!ok) {
+      setError("Usuario inexistente. Contacta al administrador.");
+      return;
+    }
     router.replace("/my-queue");
   };
 

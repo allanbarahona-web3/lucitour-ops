@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getOpsRepo } from "@/lib/data/opsRepo";
 import { useSession } from "@/lib/auth/sessionContext";
-import { ContractsStatus, type Trip, type TripMember } from "@/lib/types/ops";
+import { ContractsStatus, ContractsWorkflowStatus, type Trip, type TripMember } from "@/lib/types/ops";
 
 type RowItem = {
   member: TripMember;
@@ -28,10 +28,32 @@ const formatDate = (value?: string | null) => {
 
 export default function MyQueueSentPage() {
   const repo = useMemo(() => getOpsRepo(), []);
-  const { user } = useSession();
+  const { user, users } = useSession();
   const [rows, setRows] = useState<RowItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [query, setQuery] = useState("");
+
+  const userById = useMemo(() => {
+    const map = new Map<string, string>();
+    users.forEach((entry) => map.set(entry.id, entry.name));
+    return map;
+  }, [users]);
+
+  const statusLabel = (value: ContractsWorkflowStatus | null) => {
+    if (!value) {
+      return "Sin estado";
+    }
+    if (value === ContractsWorkflowStatus.IN_PROGRESS) {
+      return "En progreso";
+    }
+    if (value === ContractsWorkflowStatus.INFO_PENDING) {
+      return "Info pendiente";
+    }
+    if (value === ContractsWorkflowStatus.SENT_TO_SIGN) {
+      return "Enviado a firmar";
+    }
+    return "Aprobado";
+  };
 
   useEffect(() => {
     const loadRows = async () => {
@@ -69,6 +91,10 @@ export default function MyQueueSentPage() {
     };
 
     void loadRows();
+    const interval = setInterval(() => {
+      void loadRows();
+    }, 15000);
+    return () => clearInterval(interval);
   }, [repo, user.id]);
 
   const filteredRows = useMemo(() => {
@@ -113,13 +139,16 @@ export default function MyQueueSentPage() {
           ) : filteredRows.length === 0 ? (
             <p className="text-sm text-slate-500">Sin enviados</p>
           ) : (
-            <table className="min-w-[980px] w-full border-collapse text-sm">
+            <table className="min-w-[1180px] w-full border-collapse text-sm">
               <thead className="bg-slate-50 text-left text-xs text-slate-600">
                 <tr>
                   <th className="px-3 py-2">Nombre</th>
                   <th className="px-3 py-2">ID</th>
                   <th className="px-3 py-2">Reserva</th>
                   <th className="px-3 py-2">Enviado</th>
+                  <th className="px-3 py-2">Estado</th>
+                  <th className="px-3 py-2">Tomado por</th>
+                  <th className="px-3 py-2">Actualizado</th>
                   <th className="px-3 py-2">Viaje</th>
                 </tr>
               </thead>
@@ -130,6 +159,19 @@ export default function MyQueueSentPage() {
                     <td className="px-3 py-2 text-slate-600">{member.identification || "-"}</td>
                     <td className="px-3 py-2 text-slate-600">{member.reservationCode}</td>
                     <td className="px-3 py-2 text-slate-600">{formatDate(member.contractsSentAt)}</td>
+                    <td className="px-3 py-2 text-slate-600">
+                      {statusLabel(member.contractsWorkflowStatus)}
+                    </td>
+                    <td className="px-3 py-2 text-slate-600">
+                      {member.contractsTakenByUserId
+                        ? userById.get(member.contractsTakenByUserId) ?? "-"
+                        : "-"}
+                    </td>
+                    <td className="px-3 py-2 text-slate-600">
+                      {member.contractsStatusUpdatedAt
+                        ? new Date(member.contractsStatusUpdatedAt).toLocaleString()
+                        : "-"}
+                    </td>
                     <td className="px-3 py-2 text-slate-600">{trip ? trip.name : "-"}</td>
                   </tr>
                 ))}

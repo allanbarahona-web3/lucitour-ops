@@ -87,6 +87,21 @@ const generateReservationCode = () => {
   return `${month}${year}${suffix}`;
 };
 
+const quoteMonthOptions = [
+  "Enero",
+  "Febrero",
+  "Marzo",
+  "Abril",
+  "Mayo",
+  "Junio",
+  "Julio",
+  "Agosto",
+  "Septiembre",
+  "Octubre",
+  "Noviembre",
+  "Diciembre",
+];
+
 export const AddTripMemberDialog = ({
   tripId,
   tripName,
@@ -105,7 +120,8 @@ export const AddTripMemberDialog = ({
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
   const [quoteLeadId, setQuoteLeadId] = useState<string | null>(null);
   const [quoteDestination, setQuoteDestination] = useState("");
-  const [quoteMonth, setQuoteMonth] = useState("");
+  const [quoteMonthValue, setQuoteMonthValue] = useState("");
+  const [quoteYearValue, setQuoteYearValue] = useState("");
   const [isSavingQuote, setIsSavingQuote] = useState(false);
   const isAdmin = currentUser.role === Role.ADMIN;
   const isAgent = currentUser.role === Role.AGENT || currentUser.role === Role.SUPERVISOR;
@@ -177,6 +193,7 @@ export const AddTripMemberDialog = ({
 
     if (isAgent && wantsReservation === "QUOTE") {
       const lead = await repo.createLead({
+        agentUserId: currentUser.id,
         fullName: values.fullName,
         identificationTypeId: values.identificationTypeId,
         identification: values.identification,
@@ -190,7 +207,8 @@ export const AddTripMemberDialog = ({
       });
       setQuoteLeadId(lead.id);
       setQuoteDestination("");
-      setQuoteMonth("");
+      setQuoteMonthValue("");
+      setQuoteYearValue(String(new Date().getFullYear()));
       setQuoteDialogOpen(true);
       setOpen(false);
       return;
@@ -241,9 +259,14 @@ export const AddTripMemberDialog = ({
       contractsStatus: ContractsStatus.NOT_SENT,
       contractsSentByUserId: null,
       contractsSentAt: null,
+      contractsWorkflowStatus: null,
+      contractsTakenByUserId: null,
+      contractsTakenAt: null,
+      contractsStatusUpdatedAt: null,
       billingStatus: BillingStatus.NOT_SENT,
       billingSentByUserId: null,
       billingSentAt: null,
+      billingStatusUpdatedAt: null,
       assignedToUserId: values.assignedToUserId ?? currentUser.id,
     };
 
@@ -255,6 +278,7 @@ export const AddTripMemberDialog = ({
   const handleConvertLead = async () => {
     const values = form.getValues();
     await repo.createLead({
+      agentUserId: currentUser.id,
       fullName: values.fullName,
       identificationTypeId: values.identificationTypeId,
       identification: values.identification,
@@ -270,13 +294,19 @@ export const AddTripMemberDialog = ({
   };
 
   const handleSendQuote = async () => {
-    if (!quoteLeadId || !quoteDestination.trim() || !quoteMonth.trim()) {
+    if (
+      !quoteLeadId ||
+      !quoteDestination.trim() ||
+      !quoteMonthValue.trim() ||
+      !quoteYearValue.trim()
+    ) {
       return;
     }
     setIsSavingQuote(true);
+    const travelMonth = `${quoteMonthValue} ${quoteYearValue}`;
     await repo.updateLead(quoteLeadId, {
       quoteDestination: quoteDestination.trim(),
-      quoteTravelMonth: quoteMonth.trim(),
+      quoteTravelMonth: travelMonth,
       quoteStatus: QuoteStatus.SENT,
     });
     setIsSavingQuote(false);
@@ -652,12 +682,36 @@ export const AddTripMemberDialog = ({
             </div>
             <div className="space-y-1">
               <Label htmlFor="quoteMonth">Mes a viajar</Label>
-              <Input
-                id="quoteMonth"
-                placeholder="Ej. Junio 2026"
-                value={quoteMonth}
-                onChange={(event) => setQuoteMonth(event.target.value)}
-              />
+              <div className="grid gap-2 sm:grid-cols-2">
+                <select
+                  id="quoteMonth"
+                  className={selectClassName}
+                  value={quoteMonthValue}
+                  onChange={(event) => setQuoteMonthValue(event.target.value)}
+                >
+                  <option value="">Mes</option>
+                  {quoteMonthOptions.map((month) => (
+                    <option key={month} value={month}>
+                      {month}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className={selectClassName}
+                  value={quoteYearValue}
+                  onChange={(event) => setQuoteYearValue(event.target.value)}
+                >
+                  <option value="">Ano</option>
+                  {Array.from({ length: 6 }, (_, index) => {
+                    const year = new Date().getFullYear() + index;
+                    return (
+                      <option key={year} value={String(year)}>
+                        {year}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
             </div>
           </div>
           <div className="flex justify-end gap-2">

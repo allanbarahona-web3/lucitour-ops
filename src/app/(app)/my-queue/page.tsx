@@ -58,6 +58,7 @@ export default function MyQueuePage() {
   const [sentItems, setSentItems] = useState<SentItem[]>([]);
   const [contractItems, setContractItems] = useState<TripMember[]>([]);
   const [quoteCount, setQuoteCount] = useState(0);
+  const [billingCount, setBillingCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -106,6 +107,12 @@ export default function MyQueuePage() {
           (b.member.contractsSentAt ?? "").localeCompare(a.member.contractsSentAt ?? ""),
         );
 
+      const nextBillingCount = tripMembersByTrip
+        .flatMap(({ members }) => members)
+        .filter(
+          (member) => member.billingStatus === "SENT" && member.assignedToUserId === user.id,
+        ).length;
+
       const nextQuoteCount = leads.filter(
         (lead) => lead.agentUserId === user.id && lead.quoteStatus !== QuoteStatus.PENDING,
       ).length;
@@ -115,10 +122,15 @@ export default function MyQueuePage() {
       setSentItems(nextSentItems);
       setContractItems(nextContractItems);
       setQuoteCount(nextQuoteCount);
+      setBillingCount(nextBillingCount);
       setIsLoading(false);
     };
 
     void loadQueue();
+    const interval = setInterval(() => {
+      void loadQueue();
+    }, 15000);
+    return () => clearInterval(interval);
   }, [repo, user.id]);
 
   const grouped = useMemo(() => {
@@ -147,7 +159,7 @@ export default function MyQueuePage() {
       {isLoading ? (
         <p className="text-sm text-slate-600">Cargando pendientes...</p>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           {([
             {
               key: "contract" as QueueGroupKey,
@@ -169,6 +181,11 @@ export default function MyQueuePage() {
               href: "/my-queue/quotes",
               count: quoteCount,
             },
+            {
+              key: "billing" as const,
+              href: "/my-queue/billing",
+              count: billingCount,
+            },
           ]).map((item) => (
             <Link key={item.href} href={item.href} className="block">
               <Card className="h-full transition hover:border-slate-300">
@@ -178,7 +195,9 @@ export default function MyQueuePage() {
                       ? "Contratos en revision"
                       : item.key === "quotes"
                         ? "Cotizaciones enviadas"
-                        : groupLabels[item.key]}
+                        : item.key === "billing"
+                          ? "Estados de cuenta"
+                          : groupLabels[item.key]}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>

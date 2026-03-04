@@ -53,6 +53,10 @@ export default function MyQueueQuotesPage() {
     };
 
     void loadRows();
+    const interval = setInterval(() => {
+      void loadRows();
+    }, 15000);
+    return () => clearInterval(interval);
   }, [repo, user.id]);
 
   const filteredRows = useMemo(() => {

@@ -2,9 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { useSession } from "@/lib/auth/sessionContext";
-import { Role } from "@/lib/types/ops";
+import { Button } from "../../../../components/ui/button";
+import { useSession } from "../../../../lib/auth/sessionContext";
+import { Role } from "../../../../lib/types/ops";
 
 const roleLabels: Record<Role, string> = {
   [Role.ADMIN]: "Admin",

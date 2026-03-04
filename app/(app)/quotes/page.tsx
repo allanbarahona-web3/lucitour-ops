@@ -108,6 +108,10 @@ export default function QuotesPage() {
 
     void loadCatalogs();
     void loadRows();
+    const interval = setInterval(() => {
+      void loadRows();
+    }, 15000);
+    return () => clearInterval(interval);
   }, [repo]);
 
   const handleMarkInProgress = async (lead: Lead) => {
@@ -170,6 +174,7 @@ export default function QuotesPage() {
       billingStatus: BillingStatus.SENT,
       billingSentByUserId: user.id,
       billingSentAt: now,
+      billingStatusUpdatedAt: now,
       isDraft: false,
     });
     if (updated) {

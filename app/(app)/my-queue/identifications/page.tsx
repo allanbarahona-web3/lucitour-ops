@@ -52,6 +52,10 @@ export default function MyQueueIdentificationsPage() {
     };
 
     void loadRows();
+    const interval = setInterval(() => {
+      void loadRows();
+    }, 15000);
+    return () => clearInterval(interval);
   }, [repo, user.id]);
 
   const filteredRows = useMemo(() => {

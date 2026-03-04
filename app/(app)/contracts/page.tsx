@@ -5,14 +5,15 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { getOpsRepo } from "@/lib/data/opsRepo";
 import { useSession } from "@/lib/auth/sessionContext";
-import type { Trip, TripMember } from "@/lib/types/ops";
+import { ContractsWorkflowStatus, type Trip, type TripMember } from "@/lib/types/ops";
 
 export default function ContractsPage() {
   const repo = useMemo(() => getOpsRepo(), []);
-  const { users } = useSession();
+  const { user, users } = useSession();
   const [items, setItems] = useState<TripMember[]>([]);
   const [tripMap, setTripMap] = useState<Record<string, Trip>>({});
   const [isLoading, setIsLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const userById = useMemo(() => {
     const map = new Map<string, string>();
@@ -39,7 +40,34 @@ export default function ContractsPage() {
 
   useEffect(() => {
     void loadQueue();
-  }, []);
+    const interval = setInterval(() => {
+      void loadQueue();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [repo]);
+
+  const statusOptions = [
+    { value: ContractsWorkflowStatus.IN_PROGRESS, label: "En progreso" },
+    { value: ContractsWorkflowStatus.INFO_PENDING, label: "Info pendiente" },
+    { value: ContractsWorkflowStatus.SENT_TO_SIGN, label: "Enviado a firmar" },
+    { value: ContractsWorkflowStatus.APPROVED, label: "Aprobado" },
+  ];
+
+  const handleStatusChange = async (member: TripMember, status: ContractsWorkflowStatus) => {
+    setBusyId(member.id);
+    const now = new Date().toISOString();
+    const updated = await repo.updateTripMember(member.tripId, member.id, {
+      contractsWorkflowStatus: status,
+      contractsTakenByUserId: member.contractsTakenByUserId ?? user.id,
+      contractsTakenAt: member.contractsTakenAt ?? now,
+      contractsStatusUpdatedAt: now,
+      updatedAt: now,
+    });
+    if (updated) {
+      setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+    }
+    setBusyId(null);
+  };
 
   return (
     <div className="space-y-6">
@@ -65,8 +93,12 @@ export default function ContractsPage() {
                 <th className="px-3 py-2">Pasajero</th>
                 <th className="px-3 py-2">Viaje</th>
                 <th className="px-3 py-2">Reserva</th>
+                <th className="px-3 py-2">Cotizacion</th>
                 <th className="px-3 py-2">Enviado por</th>
                 <th className="px-3 py-2">Fecha envio</th>
+                <th className="px-3 py-2">Estado</th>
+                <th className="px-3 py-2">Tomado por</th>
+                <th className="px-3 py-2">Actualizado</th>
                 <th className="px-3 py-2">Accion</th>
               </tr>
             </thead>
@@ -78,6 +110,7 @@ export default function ContractsPage() {
                     <td className="px-3 py-2 font-medium text-slate-900">{member.fullName}</td>
                     <td className="px-3 py-2 text-slate-600">{trip ? trip.name : "-"}</td>
                     <td className="px-3 py-2 text-slate-600">{member.reservationCode || "-"}</td>
+                    <td className="px-3 py-2 text-slate-600">{member.quoteCode || "-"}</td>
                     <td className="px-3 py-2 text-slate-600">
                       {member.contractsSentByUserId
                         ? userById.get(member.contractsSentByUserId) ?? "-"
@@ -86,6 +119,36 @@ export default function ContractsPage() {
                     <td className="px-3 py-2 text-slate-600">
                       {member.contractsSentAt
                         ? new Date(member.contractsSentAt).toLocaleString()
+                        : "-"}
+                    </td>
+                    <td className="px-3 py-2 text-slate-600">
+                      <select
+                        className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                        value={member.contractsWorkflowStatus ?? ""}
+                        onChange={(event) =>
+                          void handleStatusChange(
+                            member,
+                            event.target.value as ContractsWorkflowStatus,
+                          )
+                        }
+                        disabled={busyId === member.id}
+                      >
+                        <option value="">Selecciona</option>
+                        {statusOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-3 py-2 text-slate-600">
+                      {member.contractsTakenByUserId
+                        ? userById.get(member.contractsTakenByUserId) ?? "-"
+                        : "-"}
+                    </td>
+                    <td className="px-3 py-2 text-slate-600">
+                      {member.contractsStatusUpdatedAt
+                        ? new Date(member.contractsStatusUpdatedAt).toLocaleString()
                         : "-"}
                     </td>
                     <td className="px-3 py-2">

@@ -1847,6 +1847,7 @@ export const TripMembersTable = ({
                                     billingStatus: BillingStatus.SENT,
                                     billingSentByUserId: currentUser.id,
                                     billingSentAt: new Date().toISOString(),
+                                    billingStatusUpdatedAt: new Date().toISOString(),
                                     isDraft: false,
                                   })
                                 }

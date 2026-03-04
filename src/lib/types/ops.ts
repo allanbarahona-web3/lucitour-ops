@@ -111,6 +111,13 @@ export enum BillingStatus {
   SENT = "SENT",
 }
 
+export enum ContractsWorkflowStatus {
+  IN_PROGRESS = "IN_PROGRESS",
+  INFO_PENDING = "INFO_PENDING",
+  SENT_TO_SIGN = "SENT_TO_SIGN",
+  APPROVED = "APPROVED",
+}
+
 export enum QuoteStatus {
   PENDING = "PENDING",
   SENT = "SENT",
@@ -207,9 +214,14 @@ export interface TripMember {
   contractsStatus: ContractsStatus;
   contractsSentByUserId: string | null;
   contractsSentAt: string | null;
+  contractsWorkflowStatus: ContractsWorkflowStatus | null;
+  contractsTakenByUserId: string | null;
+  contractsTakenAt: string | null;
+  contractsStatusUpdatedAt: string | null;
   billingStatus: BillingStatus;
   billingSentByUserId: string | null;
   billingSentAt: string | null;
+  billingStatusUpdatedAt: string | null;
   quoteCode?: string | null;
   enteredByUserId: string;
   assignedToUserId: string;

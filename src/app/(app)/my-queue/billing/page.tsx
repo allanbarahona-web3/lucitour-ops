@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getOpsRepo } from "@/lib/data/opsRepo";
 import { useSession } from "@/lib/auth/sessionContext";
-import { ContractsStatus, ContractsWorkflowStatus, type Trip, type TripMember } from "@/lib/types/ops";
+import { BillingStatus, type Trip, type TripMember } from "@/lib/types/ops";
 
 type RowItem = {
   member: TripMember;
@@ -26,34 +26,12 @@ const formatDate = (value?: string | null) => {
   });
 };
 
-export default function MyQueueSentPage() {
+export default function MyQueueBillingPage() {
   const repo = useMemo(() => getOpsRepo(), []);
-  const { user, users } = useSession();
+  const { user } = useSession();
   const [rows, setRows] = useState<RowItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [query, setQuery] = useState("");
-
-  const userById = useMemo(() => {
-    const map = new Map<string, string>();
-    users.forEach((entry) => map.set(entry.id, entry.name));
-    return map;
-  }, [users]);
-
-  const statusLabel = (value: ContractsWorkflowStatus | null) => {
-    if (!value) {
-      return "Sin estado";
-    }
-    if (value === ContractsWorkflowStatus.IN_PROGRESS) {
-      return "En progreso";
-    }
-    if (value === ContractsWorkflowStatus.INFO_PENDING) {
-      return "Info pendiente";
-    }
-    if (value === ContractsWorkflowStatus.SENT_TO_SIGN) {
-      return "Enviado a firmar";
-    }
-    return "Aprobado";
-  };
 
   useEffect(() => {
     const loadRows = async () => {
@@ -74,18 +52,13 @@ export default function MyQueueSentPage() {
           members
             .filter(
               (member) =>
-                member.contractsStatus === ContractsStatus.SENT &&
-                member.contractsSentByUserId === user.id,
+                member.billingStatus === BillingStatus.SENT && member.assignedToUserId === user.id,
             )
-            .map((member) => ({ member, trip })),
+            .map((member) => ({ member, trip: tripMap[member.tripId] ?? trip })),
         )
         .sort((a, b) =>
-          (b.member.contractsSentAt ?? "").localeCompare(a.member.contractsSentAt ?? ""),
-        )
-        .map((entry) => ({
-          ...entry,
-          trip: tripMap[entry.member.tripId] ?? entry.trip,
-        }));
+          (b.member.billingSentAt ?? "").localeCompare(a.member.billingSentAt ?? ""),
+        );
       setRows(nextRows);
       setIsLoading(false);
     };
@@ -113,8 +86,8 @@ export default function MyQueueSentPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Contratos en revision</h1>
-          <p className="text-sm text-slate-600">Envios a contratos pendientes de revision.</p>
+          <h1 className="text-2xl font-semibold text-slate-900">Estados de cuenta</h1>
+          <p className="text-sm text-slate-600">Pendientes enviados a facturacion.</p>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <input
@@ -139,15 +112,13 @@ export default function MyQueueSentPage() {
           ) : filteredRows.length === 0 ? (
             <p className="text-sm text-slate-500">Sin enviados</p>
           ) : (
-            <table className="min-w-[1180px] w-full border-collapse text-sm">
+            <table className="min-w-[1100px] w-full border-collapse text-sm">
               <thead className="bg-slate-50 text-left text-xs text-slate-600">
                 <tr>
                   <th className="px-3 py-2">Nombre</th>
                   <th className="px-3 py-2">ID</th>
                   <th className="px-3 py-2">Reserva</th>
                   <th className="px-3 py-2">Enviado</th>
-                  <th className="px-3 py-2">Estado</th>
-                  <th className="px-3 py-2">Tomado por</th>
                   <th className="px-3 py-2">Actualizado</th>
                   <th className="px-3 py-2">Viaje</th>
                 </tr>
@@ -158,19 +129,9 @@ export default function MyQueueSentPage() {
                     <td className="px-3 py-2 text-slate-900">{member.fullName}</td>
                     <td className="px-3 py-2 text-slate-600">{member.identification || "-"}</td>
                     <td className="px-3 py-2 text-slate-600">{member.reservationCode}</td>
-                    <td className="px-3 py-2 text-slate-600">{formatDate(member.contractsSentAt)}</td>
+                    <td className="px-3 py-2 text-slate-600">{formatDate(member.billingSentAt)}</td>
                     <td className="px-3 py-2 text-slate-600">
-                      {statusLabel(member.contractsWorkflowStatus)}
-                    </td>
-                    <td className="px-3 py-2 text-slate-600">
-                      {member.contractsTakenByUserId
-                        ? userById.get(member.contractsTakenByUserId) ?? "-"
-                        : "-"}
-                    </td>
-                    <td className="px-3 py-2 text-slate-600">
-                      {member.contractsStatusUpdatedAt
-                        ? new Date(member.contractsStatusUpdatedAt).toLocaleString()
-                        : "-"}
+                      {formatDate(member.billingStatusUpdatedAt)}
                     </td>
                     <td className="px-3 py-2 text-slate-600">{trip ? trip.name : "-"}</td>
                   </tr>

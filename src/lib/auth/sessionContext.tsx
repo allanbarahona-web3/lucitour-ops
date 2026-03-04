@@ -10,9 +10,11 @@ interface SessionContextValue {
   setUserById: (userId: string) => void;
   users: User[];
   updateUserRole: (userId: string, role: User["role"]) => void;
+  addUser: (input: Omit<User, "id">) => User;
+  removeUser: (userId: string) => void;
   isAuthenticated: boolean;
   isReady: boolean;
-  login: (userId: string) => void;
+  login: (userId: string) => boolean;
   logout: () => void;
 }
 
@@ -56,16 +58,37 @@ export const SessionProvider = ({ children }: SessionProviderProps) => {
     }
   };
 
+  const addUser = (input: Omit<User, "id">) => {
+    const created: User = {
+      id: `ops_user_${Date.now()}`,
+      ...input,
+    };
+    setUsers((prev) => [...prev, created]);
+    return created;
+  };
+
+  const removeUser = (userId: string) => {
+    setUsers((prev) => prev.filter((entry) => entry.id !== userId));
+    if (user.id === userId) {
+      setIsAuthenticated(false);
+      setUser(defaultUser);
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("opsUserId");
+      }
+    }
+  };
+
   const login = (userId: string) => {
     const nextUser = users.find((entry) => entry.id === userId);
     if (!nextUser) {
-      return;
+      return false;
     }
     setUser(nextUser);
     setIsAuthenticated(true);
     if (typeof window !== "undefined") {
       localStorage.setItem("opsUserId", nextUser.id);
     }
+    return true;
   };
 
   const logout = () => {
@@ -82,6 +105,8 @@ export const SessionProvider = ({ children }: SessionProviderProps) => {
       setUserById,
       users,
       updateUserRole,
+      addUser,
+      removeUser,
       isAuthenticated,
       isReady,
       login,
