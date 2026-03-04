@@ -67,12 +67,29 @@ const TopbarControls = ({ user }: TopbarProps) => {
   const todayKey = new Date().toISOString().split("T")[0];
 
   useEffect(() => {
+    let isActive = true;
     const loadPunches = async () => {
       const data = await repo.listTimePunches();
-      setPunches(data);
+      if (isActive) {
+        setPunches(data);
+      }
     };
 
     void loadPunches();
+    const interval = setInterval(loadPunches, 10000);
+    const handlePunchEvent = () => {
+      void loadPunches();
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("ops-time-punch", handlePunchEvent);
+    }
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+      if (typeof window !== "undefined") {
+        window.removeEventListener("ops-time-punch", handlePunchEvent);
+      }
+    };
   }, [repo]);
 
   useEffect(() => {
@@ -172,6 +189,9 @@ const TopbarControls = ({ user }: TopbarProps) => {
         occurredAt: new Date().toISOString(),
       });
       setPunches((prev) => [created, ...prev]);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("ops-time-punch"));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo registrar el punch.");
     } finally {

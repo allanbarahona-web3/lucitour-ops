@@ -127,6 +127,9 @@ export const AppShell = ({ children }: AppShellProps) => {
         occurredAt: new Date().toISOString(),
       });
       setHasStartedShift(true);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("ops-time-punch"));
+      }
     } catch (err) {
       setPunchError(err instanceof Error ? err.message : "No se pudo registrar la entrada.");
     } finally {
