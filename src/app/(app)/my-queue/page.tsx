@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { getOpsRepo } from "../../../lib/data/opsRepo";
@@ -53,6 +54,7 @@ const getMemberGroups = (member: TripMember): QueueGroupKey[] => {
 export default function MyQueuePage() {
   const repo = useMemo(() => getOpsRepo(), []);
   const { user } = useSession();
+  const router = useRouter();
   const [items, setItems] = useState<QueueItem[]>([]);
   const [tripMap, setTripMap] = useState<Record<string, Trip>>({});
   const [sentItems, setSentItems] = useState<SentItem[]>([]);
@@ -62,6 +64,10 @@ export default function MyQueuePage() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    if (user.role === "ADMIN") {
+      router.replace("/admin/dashboard");
+      return;
+    }
     const loadQueue = async () => {
       setIsLoading(true);
       const [queueMembers, trips, leads] = await Promise.all([
@@ -131,7 +137,7 @@ export default function MyQueuePage() {
       void loadQueue();
     }, 15000);
     return () => clearInterval(interval);
-  }, [repo, user.id]);
+  }, [repo, router, user.id, user.role]);
 
   const grouped = useMemo(() => {
     return items.reduce<Record<QueueGroupKey, QueueItem[]>>(

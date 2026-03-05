@@ -55,6 +55,10 @@ export interface PayrollGlobalConfig {
   retentionRate: number;
 }
 
+export interface BillingConfig {
+  exchangeRate: number;
+}
+
 export interface PayrollDeduction {
   id: string;
   userId: string;
@@ -170,6 +174,7 @@ export interface Trip {
 export interface TripMember {
   id: string;
   tripId: string;
+  clientId: string | null;
   fullName: string;
   phone: string;
   email: string;
@@ -222,6 +227,7 @@ export interface TripMember {
   billingSentByUserId: string | null;
   billingSentAt: string | null;
   billingStatusUpdatedAt: string | null;
+  billingTotalAmount: number | null;
   quoteCode?: string | null;
   enteredByUserId: string;
   assignedToUserId: string;
@@ -292,6 +298,35 @@ export interface Lead {
   quoteTripMemberId: string | null;
 }
 
+export interface Client {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  identificationTypeId: string;
+  identification: string;
+  phone: string;
+  email: string;
+  nationalityId: string;
+  medicalNotes: string;
+}
+
+export interface ClientPurchase {
+  tripId: string;
+  tripName: string;
+  tripDateFrom: string;
+  tripDateTo: string;
+  memberId: string;
+  reservationCode: string;
+  contractsStatus: ContractsStatus;
+  contractsSentAt: string | null;
+  billingStatus: BillingStatus;
+  totalAmount: number | null;
+  createdAt: string;
+}
+
 export type CatalogName =
   | "airlines"
   | "lodgingTypes"
@@ -304,8 +339,14 @@ export type CreateTripInput = Omit<Trip, "id">;
 
 export type CreateTripMemberInput = Omit<
   TripMember,
-  "id" | "tripId" | "enteredByUserId" | "assignedToUserId" | "createdAt" | "updatedAt"
-> & { assignedToUserId?: string };
+  | "id"
+  | "tripId"
+  | "clientId"
+  | "enteredByUserId"
+  | "assignedToUserId"
+  | "createdAt"
+  | "updatedAt"
+> & { assignedToUserId?: string; clientId?: string | null };
 
 export type UpdateTripMemberPatch = Partial<
   Omit<TripMember, "id" | "tripId" | "enteredByUserId">
@@ -327,6 +368,8 @@ export type UpdatePayrollRoleConfig = Partial<
 > & { role: Role };
 
 export type UpdatePayrollGlobalConfig = Partial<PayrollGlobalConfig>;
+
+export type UpdateBillingConfig = Partial<BillingConfig>;
 
 export type CreatePayrollDeductionInput = Omit<
   PayrollDeduction,
@@ -372,6 +415,20 @@ export type CreateLeadInput = Omit<
   quoteTripId?: string | null;
   quoteTripMemberId?: string | null;
 };
+
+export type CreateClientInput = {
+  firstName: string;
+  lastName: string;
+  email?: string;
+  phone?: string;
+  medicalNotes?: string;
+  identificationTypeId?: string;
+  identification?: string;
+  nationalityId?: string;
+  fullName?: string;
+};
+
+export type UpdateClientPatch = Partial<Omit<Client, "id" | "createdAt">>;
 
 export type UpdateLeadPatch = Partial<Omit<Lead, "id" | "createdAt">>;
 

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { getOpsRepo } from "@/lib/data/opsRepo";
 import { useSession } from "@/lib/auth/sessionContext";
-import { ContractsWorkflowStatus, type Trip, type TripMember } from "@/lib/types/ops";
+import { ContractsWorkflowStatus, Role, type Trip, type TripMember } from "@/lib/types/ops";
 
 export default function ContractsPage() {
   const repo = useMemo(() => getOpsRepo(), []);
@@ -14,6 +14,7 @@ export default function ContractsPage() {
   const [tripMap, setTripMap] = useState<Record<string, Trip>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const canViewClient = user.role === Role.ADMIN || user.role === Role.CONTRACTS;
 
   const userById = useMemo(() => {
     const map = new Map<string, string>();
@@ -152,12 +153,22 @@ export default function ContractsPage() {
                         : "-"}
                     </td>
                     <td className="px-3 py-2">
-                      <Link
-                        href={`/trips/${member.tripId}?focus=${member.id}`}
-                        className="text-xs font-semibold text-cyan-600 hover:underline"
-                      >
-                        Ver ficha
-                      </Link>
+                      <div className="flex flex-col gap-1">
+                        <Link
+                          href={`/trips/${member.tripId}?focus=${member.id}`}
+                          className="text-xs font-semibold text-cyan-600 hover:underline"
+                        >
+                          Ver ficha
+                        </Link>
+                        {canViewClient && member.clientId ? (
+                          <Link
+                            href={`/clients?clientId=${member.clientId}`}
+                            className="text-xs font-semibold text-cyan-600 hover:underline"
+                          >
+                            Ver cliente
+                          </Link>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 );

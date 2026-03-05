@@ -267,6 +267,7 @@ export const AddTripMemberDialog = ({
       billingSentByUserId: null,
       billingSentAt: null,
       billingStatusUpdatedAt: null,
+      billingTotalAmount: null,
       assignedToUserId: values.assignedToUserId ?? currentUser.id,
     };
 

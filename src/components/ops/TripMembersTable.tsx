@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -96,6 +96,7 @@ export const TripMembersTable = ({
   maxSeats,
 }: TripMembersTableProps) => {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [members, setMembers] = useState<TripMember[]>([]);
   const [catalogs, setCatalogs] = useState<CatalogMap>({
     airlines: [],
@@ -131,6 +132,9 @@ export const TripMembersTable = ({
     open: boolean;
     member: TripMember | null;
   }>({ open: false, member: null });
+  const [sentSummaryStep, setSentSummaryStep] = useState<
+    "GENERAL" | "STEP1" | "STEP2" | "STEP3" | "STEP4" | "STEP5"
+  >("GENERAL");
   const [modStep, setModStep] = useState<ContractModificationStep>("STEP1");
   const [modDraft, setModDraft] = useState<TripMember | null>(null);
   const [isSavingModification, setIsSavingModification] = useState(false);
@@ -142,6 +146,7 @@ export const TripMembersTable = ({
   const isAdmin = currentUser.role === Role.ADMIN;
   const isAgent = currentUser.role === Role.AGENT || currentUser.role === Role.SUPERVISOR;
   const isSupervisor = currentUser.role === Role.SUPERVISOR;
+  const canManageClients = isAdmin || isSupervisor;
 
   const userById = useMemo(() => {
     const map = new Map<string, User>();
@@ -346,6 +351,7 @@ export const TripMembersTable = ({
 
   const openSentSummaryDialog = (member: TripMember) => {
     setSentSummaryDialog({ open: true, member });
+    setSentSummaryStep("GENERAL");
   };
 
   const updateDraft = (patch: UpdateTripMemberPatch) => {
@@ -1915,9 +1921,24 @@ export const TripMembersTable = ({
                         {getContractsStatusLabel(member)}
                       </td>
                       <td className="px-3 py-2">
-                        <Button size="sm" variant="outline" onClick={() => openModificationDialog(member)}>
-                          Solicitar modificacion
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openModificationDialog(member)}
+                          >
+                            Solicitar modificacion
+                          </Button>
+                          {canManageClients && member.clientId ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => router.push(`/clients?clientId=${member.clientId}`)}
+                            >
+                              Ver cliente
+                            </Button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -2972,9 +2993,12 @@ export const TripMembersTable = ({
       {isAgent ? (
         <Dialog
           open={sentSummaryDialog.open}
-          onOpenChange={(open) =>
-            setSentSummaryDialog((prev) => ({ open, member: open ? prev.member : null }))
-          }
+          onOpenChange={(open) => {
+            if (!open) {
+              setSentSummaryStep("GENERAL");
+            }
+            setSentSummaryDialog((prev) => ({ open, member: open ? prev.member : null }));
+          }}
         >
           <DialogContent className="max-w-3xl">
             <DialogHeader>
@@ -2982,209 +3006,241 @@ export const TripMembersTable = ({
             </DialogHeader>
             {summaryMember ? (
               <div className="space-y-4 text-xs text-slate-600">
-                <div className="rounded-md border border-slate-200 bg-white p-3">
-                  <div className="text-xs font-semibold text-slate-600">Datos generales</div>
-                  <div className="mt-2 grid gap-2 md:grid-cols-3">
-                    <div>
-                      <div className="text-[11px] text-slate-500">Pasajero</div>
-                      <div className="font-semibold text-slate-900">
-                        {summaryMember.fullName}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-slate-500">Identificacion</div>
-                      <div>{summaryMember.identification || "-"}</div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-slate-500">Viaje</div>
-                      <div>
-                        {tripName} · {tripDateFrom} - {tripDateTo}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-slate-500">Correo</div>
-                      <div>{summaryMember.email || "-"}</div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-slate-500">Telefono</div>
-                      <div>{summaryMember.phone || "-"}</div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-slate-500">Enviado</div>
-                      <div>
-                        {summaryMember.contractsSentAt
-                          ? formatDate(summaryMember.contractsSentAt)
-                          : "-"}
-                      </div>
-                    </div>
-                  </div>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: "GENERAL", label: "Datos" },
+                    { id: "STEP1", label: "Paso 1" },
+                    { id: "STEP2", label: "Paso 2" },
+                    { id: "STEP3", label: "Paso 3" },
+                    { id: "STEP4", label: "Paso 4" },
+                    { id: "STEP5", label: "Paso 5" },
+                  ].map((step) => (
+                    <Button
+                      key={step.id}
+                      size="sm"
+                      variant={sentSummaryStep === step.id ? "default" : "outline"}
+                      onClick={() => setSentSummaryStep(step.id as typeof sentSummaryStep)}
+                    >
+                      {step.label}
+                    </Button>
+                  ))}
                 </div>
 
-                <div className="rounded-md border border-slate-200 bg-white p-3">
-                  <div className="text-xs font-semibold text-slate-600">Paso 1 · Datos del viaje</div>
-                  <div className="mt-2 grid gap-2 md:grid-cols-2">
-                    <div>
-                      <div className="text-[11px] text-slate-500">Direccion exacta</div>
-                      <div>{summaryMember.address || "-"}</div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-slate-500">Estado civil</div>
+                {sentSummaryStep === "GENERAL" ? (
+                  <div className="rounded-md border border-slate-200 bg-white p-3">
+                    <div className="text-xs font-semibold text-slate-600">Datos generales</div>
+                    <div className="mt-2 grid gap-2 md:grid-cols-3">
                       <div>
-                        {maritalOptions.find(
-                          (item) => item.value === summaryMember.maritalStatus,
-                        )?.label ?? "-"}
+                        <div className="text-[11px] text-slate-500">Pasajero</div>
+                        <div className="font-semibold text-slate-900">
+                          {summaryMember.fullName}
+                        </div>
                       </div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-slate-500">Nacionalidad</div>
                       <div>
-                        {catalogOptions.nationalities.find(
-                          (item) => item.id === summaryMember.nationalityId,
-                        )?.name ?? "-"}
+                        <div className="text-[11px] text-slate-500">Identificacion</div>
+                        <div>{summaryMember.identification || "-"}</div>
                       </div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-slate-500">Profesion u ocupacion</div>
-                      <div>{summaryMember.profession || "-"}</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-md border border-slate-200 bg-white p-3">
-                  <div className="text-xs font-semibold text-slate-600">Paso 2 · Seguro y emergencia</div>
-                  <div className="mt-2 grid gap-2 md:grid-cols-2">
-                    <div>
-                      <div className="text-[11px] text-slate-500">Desea seguro</div>
                       <div>
-                        {summaryMember.wantsInsurance === null
-                          ? "-"
-                          : summaryMember.wantsInsurance
-                            ? "Si"
-                            : "No"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-slate-500">Tipo de seguro</div>
-                      <div>
-                        {catalogOptions.insurances.find(
-                          (item) => item.id === summaryMember.insuranceId,
-                        )?.name ?? "-"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-slate-500">Seguro propio</div>
-                      <div>
-                        {summaryMember.hasOwnInsurance === null
-                          ? "-"
-                          : summaryMember.hasOwnInsurance
-                            ? "Si"
-                            : "No"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-slate-500">Contacto emergencia</div>
-                      <div>{summaryMember.emergencyContactName || "-"}</div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-slate-500">Telefono emergencia</div>
-                      <div>{summaryMember.emergencyContactPhone || "-"}</div>
-                    </div>
-                    <div className="md:col-span-2">
-                      <div className="text-[11px] text-slate-500">Situaciones especiales</div>
-                      <div>{summaryMember.specialSituations || "-"}</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-md border border-slate-200 bg-white p-3">
-                  <div className="text-xs font-semibold text-slate-600">Paso 3 · Acompanantes</div>
-                  <div className="mt-2 space-y-2">
-                    <div>
-                      <div className="text-[11px] text-slate-500">Acompanantes</div>
-                      <div>
-                        {summaryMember.hasCompanions === null
-                          ? "-"
-                          : summaryMember.hasCompanions
-                            ? "Si"
-                            : "No"}
-                      </div>
-                    </div>
-                    {summaryMember.companions.length > 0 ? (
-                      <div className="space-y-1">
-                        {summaryMember.companions.map((companion) => (
-                          <div key={companion.id} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
-                            {companion.fullName || "(Sin nombre)"}
-                            {companion.identification ? ` · ${companion.identification}` : ""}
-                            {companion.isMinor ? " · Menor" : ""}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div>-</div>
-                    )}
-                    {summaryMember.hasMinorCompanions ? (
-                      <div>
-                        <div className="text-[11px] text-slate-500">Patria potestad</div>
+                        <div className="text-[11px] text-slate-500">Viaje</div>
                         <div>
-                          {summaryMember.hasParentalAuthority === null
+                          {tripName} · {tripDateFrom} - {tripDateTo}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Correo</div>
+                        <div>{summaryMember.email || "-"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Telefono</div>
+                        <div>{summaryMember.phone || "-"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Enviado</div>
+                        <div>
+                          {summaryMember.contractsSentAt
+                            ? formatDate(summaryMember.contractsSentAt)
+                            : "-"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {sentSummaryStep === "STEP1" ? (
+                  <div className="rounded-md border border-slate-200 bg-white p-3">
+                    <div className="text-xs font-semibold text-slate-600">Paso 1 · Datos del viaje</div>
+                    <div className="mt-2 grid gap-2 md:grid-cols-2">
+                      <div>
+                        <div className="text-[11px] text-slate-500">Direccion exacta</div>
+                        <div>{summaryMember.address || "-"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Estado civil</div>
+                        <div>
+                          {maritalOptions.find(
+                            (item) => item.value === summaryMember.maritalStatus,
+                          )?.label ?? "-"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Nacionalidad</div>
+                        <div>
+                          {catalogOptions.nationalities.find(
+                            (item) => item.id === summaryMember.nationalityId,
+                          )?.name ?? "-"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Profesion u ocupacion</div>
+                        <div>{summaryMember.profession || "-"}</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {sentSummaryStep === "STEP2" ? (
+                  <div className="rounded-md border border-slate-200 bg-white p-3">
+                    <div className="text-xs font-semibold text-slate-600">Paso 2 · Seguro y emergencia</div>
+                    <div className="mt-2 grid gap-2 md:grid-cols-2">
+                      <div>
+                        <div className="text-[11px] text-slate-500">Desea seguro</div>
+                        <div>
+                          {summaryMember.wantsInsurance === null
                             ? "-"
-                            : summaryMember.hasParentalAuthority
+                            : summaryMember.wantsInsurance
                               ? "Si"
                               : "No"}
                         </div>
                       </div>
-                    ) : null}
+                      <div>
+                        <div className="text-[11px] text-slate-500">Tipo de seguro</div>
+                        <div>
+                          {catalogOptions.insurances.find(
+                            (item) => item.id === summaryMember.insuranceId,
+                          )?.name ?? "-"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Seguro propio</div>
+                        <div>
+                          {summaryMember.hasOwnInsurance === null
+                            ? "-"
+                            : summaryMember.hasOwnInsurance
+                              ? "Si"
+                              : "No"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Contacto emergencia</div>
+                        <div>{summaryMember.emergencyContactName || "-"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Telefono emergencia</div>
+                        <div>{summaryMember.emergencyContactPhone || "-"}</div>
+                      </div>
+                      <div className="md:col-span-2">
+                        <div className="text-[11px] text-slate-500">Situaciones especiales</div>
+                        <div>{summaryMember.specialSituations || "-"}</div>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ) : null}
 
-                <div className="rounded-md border border-slate-200 bg-white p-3">
-                  <div className="text-xs font-semibold text-slate-600">Paso 4 · Documentos</div>
-                  <div className="mt-2 space-y-2">
-                    {[
-                      { label: "Cedula", type: "ID_CARD" as DocumentType },
-                      { label: "Pasaporte", type: "PASSPORT" as DocumentType },
-                      { label: "Permiso menor", type: "MINOR_PERMIT" as DocumentType },
-                      { label: "Seguro propio", type: "INSURANCE" as DocumentType },
-                    ].map((item) => {
-                      const docs = getDocsByType(summaryMember, item.type);
-                      if (docs.length === 0) {
-                        return null;
-                      }
-                      return (
-                        <div key={item.type} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
-                          <div className="text-[11px] text-slate-500">{item.label}</div>
-                          <div className="mt-1 flex flex-wrap gap-2">
-                            {docs.map((doc) => (
-                              <span key={doc.id} className="rounded-full border border-slate-200 bg-white px-2 py-0.5">
-                                {doc.fileName} · {doc.ownerName}
-                              </span>
-                            ))}
+                {sentSummaryStep === "STEP3" ? (
+                  <div className="rounded-md border border-slate-200 bg-white p-3">
+                    <div className="text-xs font-semibold text-slate-600">Paso 3 · Acompanantes</div>
+                    <div className="mt-2 space-y-2">
+                      <div>
+                        <div className="text-[11px] text-slate-500">Acompanantes</div>
+                        <div>
+                          {summaryMember.hasCompanions === null
+                            ? "-"
+                            : summaryMember.hasCompanions
+                              ? "Si"
+                              : "No"}
+                        </div>
+                      </div>
+                      {summaryMember.companions.length > 0 ? (
+                        <div className="space-y-1">
+                          {summaryMember.companions.map((companion) => (
+                            <div key={companion.id} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                              {companion.fullName || "(Sin nombre)"}
+                              {companion.identification ? ` · ${companion.identification}` : ""}
+                              {companion.isMinor ? " · Menor" : ""}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div>-</div>
+                      )}
+                      {summaryMember.hasMinorCompanions ? (
+                        <div>
+                          <div className="text-[11px] text-slate-500">Patria potestad</div>
+                          <div>
+                            {summaryMember.hasParentalAuthority === null
+                              ? "-"
+                              : summaryMember.hasParentalAuthority
+                                ? "Si"
+                                : "No"}
                           </div>
                         </div>
-                      );
-                    })}
+                      ) : null}
+                    </div>
                   </div>
-                </div>
+                ) : null}
 
-                <div className="rounded-md border border-slate-200 bg-white p-3">
-                  <div className="text-xs font-semibold text-slate-600">Paso 5 · Pago inicial</div>
-                  <div className="mt-2 space-y-2">
-                    {getDocsByType(summaryMember, "PAYMENT_PROOF").length === 0 ? (
-                      <div className="text-xs text-slate-500">Sin comprobantes</div>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        {getDocsByType(summaryMember, "PAYMENT_PROOF").map((doc) => (
-                          <span
-                            key={doc.id}
-                            className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px]"
-                          >
-                            {doc.fileName}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                {sentSummaryStep === "STEP4" ? (
+                  <div className="rounded-md border border-slate-200 bg-white p-3">
+                    <div className="text-xs font-semibold text-slate-600">Paso 4 · Documentos</div>
+                    <div className="mt-2 space-y-2">
+                      {[
+                        { label: "Cedula", type: "ID_CARD" as DocumentType },
+                        { label: "Pasaporte", type: "PASSPORT" as DocumentType },
+                        { label: "Permiso menor", type: "MINOR_PERMIT" as DocumentType },
+                        { label: "Seguro propio", type: "INSURANCE" as DocumentType },
+                      ].map((item) => {
+                        const docs = getDocsByType(summaryMember, item.type);
+                        if (docs.length === 0) {
+                          return null;
+                        }
+                        return (
+                          <div key={item.type} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                            <div className="text-[11px] text-slate-500">{item.label}</div>
+                            <div className="mt-1 flex flex-wrap gap-2">
+                              {docs.map((doc) => (
+                                <span key={doc.id} className="rounded-full border border-slate-200 bg-white px-2 py-0.5">
+                                  {doc.fileName} · {doc.ownerName}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
+                ) : null}
+
+                {sentSummaryStep === "STEP5" ? (
+                  <div className="rounded-md border border-slate-200 bg-white p-3">
+                    <div className="text-xs font-semibold text-slate-600">Paso 5 · Pago inicial</div>
+                    <div className="mt-2 space-y-2">
+                      {getDocsByType(summaryMember, "PAYMENT_PROOF").length === 0 ? (
+                        <div className="text-xs text-slate-500">Sin comprobantes</div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {getDocsByType(summaryMember, "PAYMENT_PROOF").map((doc) => (
+                            <span
+                              key={doc.id}
+                              className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px]"
+                            >
+                              {doc.fileName}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="flex justify-end">
                   <Button variant="outline" onClick={() => setSentSummaryDialog({ open: false, member: null })}>

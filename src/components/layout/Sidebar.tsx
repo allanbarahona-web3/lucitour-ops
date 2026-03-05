@@ -16,7 +16,7 @@ const navItems = [
   {
     href: "/my-queue",
     label: "Dashboard Agentes",
-    roles: ["ADMIN", "AGENT", "SUPERVISOR", "VIEWER"] as Role[],
+    roles: ["AGENT", "SUPERVISOR", "VIEWER"] as Role[],
   },
   {
     href: "/time-tracking",
@@ -24,6 +24,20 @@ const navItems = [
     roles: ["ADMIN"] as Role[],
   },
   { href: "/leads", label: "Leads", roles: ["ADMIN", "SUPERVISOR"] as Role[] },
+  {
+    href: "/clients",
+    label: "Clientes",
+    roles: [
+      "ADMIN",
+      "AGENT",
+      "SUPERVISOR",
+      "ACCOUNTING",
+      "CONTRACTS",
+      "QUOTES",
+      "BILLING",
+      "VIEWER",
+    ] as Role[],
+  },
   { href: "/contracts", label: "Contratos", roles: ["ADMIN", "CONTRACTS"] as Role[] },
   {
     href: "/contracts/modifications",

@@ -225,6 +225,7 @@ export const QuoteWinDialog = ({
       billingSentByUserId: isDraft ? null : currentUser.id,
       billingSentAt: isDraft ? null : now,
       billingStatusUpdatedAt: isDraft ? null : now,
+      billingTotalAmount: null,
       quoteCode: lead.quoteCode || null,
       assignedToUserId: currentUser.id,
     };

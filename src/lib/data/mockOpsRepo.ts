@@ -1,8 +1,11 @@
 import type {
   CatalogItem,
   CatalogName,
+  Client,
+  ClientPurchase,
   ContractModificationRequest,
   CreateContractModificationInput,
+  CreateClientInput,
   CreateHolidayDateInput,
   CreateLeadInput,
   CreateTripInput,
@@ -21,6 +24,8 @@ import type {
   TimePunch,
   UpdateContractModificationPatch,
   UpdateCatalogItemPatch,
+  UpdateClientPatch,
+  UpdateBillingConfig,
   UpdateLeadPatch,
   UpdatePayrollGlobalConfig,
   UpdatePayrollRoleConfig,
@@ -48,6 +53,7 @@ import {
   nationalities,
 } from "./catalogs";
 import type { IOpsRepo } from "./opsRepo";
+import type { BillingConfig } from "../types/ops";
 
 const ID_PREFIX = "ops";
 
@@ -106,6 +112,7 @@ const cloneCatalogs = (items: CatalogItem[]) => items.map((item) => ({ ...item }
 export class MockOpsRepo implements IOpsRepo {
   private tripCounter = 2;
   private memberCounter = 3;
+  private clientCounter = 1;
   private catalogCounter = 100;
   private modificationCounter = 0;
   private timePunchCounter = 0;
@@ -136,6 +143,7 @@ export class MockOpsRepo implements IOpsRepo {
     {
       id: makeId("member", 1),
       tripId: makeId("trip", 1),
+      clientId: makeId("client", 1),
       fullName: "Ana Torres",
       phone: "+52 555 010 1001",
       email: "ana.torres@correo.com",
@@ -188,6 +196,7 @@ export class MockOpsRepo implements IOpsRepo {
       billingSentByUserId: null,
       billingSentAt: null,
       billingStatusUpdatedAt: null,
+      billingTotalAmount: null,
       enteredByUserId: currentUser.id,
       assignedToUserId: currentUser.id,
       createdAt: nowIso(),
@@ -196,6 +205,7 @@ export class MockOpsRepo implements IOpsRepo {
     {
       id: makeId("member", 2),
       tripId: makeId("trip", 1),
+      clientId: null,
       fullName: "Luis Perez",
       phone: "+52 555 010 1002",
       email: "luis.perez@correo.com",
@@ -248,6 +258,7 @@ export class MockOpsRepo implements IOpsRepo {
       billingSentByUserId: null,
       billingSentAt: null,
       billingStatusUpdatedAt: null,
+      billingTotalAmount: null,
       enteredByUserId: currentUser.id,
       assignedToUserId: currentUser.id,
       createdAt: nowIso(),
@@ -256,6 +267,7 @@ export class MockOpsRepo implements IOpsRepo {
     {
       id: makeId("member", 3),
       tripId: makeId("trip", 2),
+      clientId: null,
       fullName: "Camila Vega",
       phone: "+52 555 010 1003",
       email: "camila.vega@correo.com",
@@ -308,6 +320,7 @@ export class MockOpsRepo implements IOpsRepo {
       billingSentByUserId: null,
       billingSentAt: null,
       billingStatusUpdatedAt: null,
+      billingTotalAmount: null,
       enteredByUserId: currentUser.id,
       assignedToUserId: currentUser.id,
       createdAt: nowIso(),
@@ -344,6 +357,23 @@ export class MockOpsRepo implements IOpsRepo {
     },
   ];
 
+  private clients: Client[] = [
+    {
+      id: makeId("client", 1),
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      firstName: "Ana",
+      lastName: "Torres",
+      fullName: "Ana Torres",
+      identificationTypeId: identificationTypes[0]?.id ?? "",
+      identification: "A1234567",
+      phone: "+52 555 010 1001",
+      email: "ana.torres@correo.com",
+      nationalityId: "",
+      medicalNotes: "Vegana",
+    },
+  ];
+
   private catalogs: Record<CatalogName, CatalogItem[]> = {
     airlines: cloneCatalogs(airlines),
     lodgingTypes: cloneCatalogs(lodgingTypes),
@@ -360,6 +390,9 @@ export class MockOpsRepo implements IOpsRepo {
   private payrollPayslips: PayrollPayslip[] = [];
   private payrollGlobalConfig: PayrollGlobalConfig = {
     retentionRate: 0.1083,
+  };
+  private billingConfig: BillingConfig = {
+    exchangeRate: 500,
   };
   private payrollRoleConfigs: PayrollRoleConfig[] = [
     {
@@ -498,6 +531,18 @@ export class MockOpsRepo implements IOpsRepo {
     return { ...this.payrollGlobalConfig };
   }
 
+  async getBillingConfig(): Promise<BillingConfig> {
+    return { ...this.billingConfig };
+  }
+
+  async updateBillingConfig(config: UpdateBillingConfig): Promise<BillingConfig> {
+    this.billingConfig = {
+      ...this.billingConfig,
+      ...config,
+    };
+    return { ...this.billingConfig };
+  }
+
   async listHolidayDates(): Promise<HolidayDate[]> {
     return this.holidayDates.map((item) => ({ ...item }));
   }
@@ -561,6 +606,92 @@ export class MockOpsRepo implements IOpsRepo {
     return { ...payslip };
   }
 
+  private findClientMatch(member: Pick<TripMember, "email" | "identification">): Client | null {
+    const email = member.email?.trim().toLowerCase();
+    if (email) {
+      const byEmail = this.clients.find(
+        (client) => client.email?.trim().toLowerCase() === email,
+      );
+      if (byEmail) {
+        return byEmail;
+      }
+    }
+    const identification = member.identification?.trim();
+    if (identification) {
+      return this.clients.find((client) => client.identification === identification) ?? null;
+    }
+    return null;
+  }
+
+  private splitFullName(fullName: string) {
+    const trimmed = fullName.trim();
+    if (!trimmed) {
+      return { firstName: "", lastName: "" };
+    }
+    const parts = trimmed.split(/\s+/);
+    const [firstName, ...rest] = parts;
+    return { firstName, lastName: rest.join(" ") };
+  }
+
+  private buildFullName(firstName: string, lastName: string, fallback: string) {
+    const combined = `${firstName} ${lastName}`.trim();
+    return combined || fallback || "";
+  }
+
+  private upsertClientFromMember(member: TripMember): Client {
+    const now = nowIso();
+    const preferValue = (nextValue: string, prevValue: string) =>
+      nextValue && nextValue.trim() ? nextValue : prevValue;
+    const nameParts = this.splitFullName(member.fullName);
+    const existing = this.findClientMatch(member);
+    if (existing) {
+      const nextFirstName = preferValue(nameParts.firstName, existing.firstName);
+      const nextLastName = preferValue(nameParts.lastName, existing.lastName);
+      const updated: Client = {
+        ...existing,
+        firstName: nextFirstName,
+        lastName: nextLastName,
+        fullName: this.buildFullName(
+          nextFirstName,
+          nextLastName,
+          preferValue(member.fullName, existing.fullName),
+        ),
+        identificationTypeId: preferValue(
+          member.identificationTypeId,
+          existing.identificationTypeId,
+        ),
+        identification: preferValue(member.identification, existing.identification),
+        phone: preferValue(member.phone, existing.phone),
+        email: preferValue(member.email, existing.email),
+        nationalityId: preferValue(member.nationalityId, existing.nationalityId),
+        medicalNotes: preferValue(member.specialSituations, existing.medicalNotes),
+        updatedAt: now,
+      };
+      const index = this.clients.findIndex((client) => client.id === existing.id);
+      if (index >= 0) {
+        this.clients[index] = updated;
+      }
+      return updated;
+    }
+
+    const created: Client = {
+      id: makeId("client", ++this.clientCounter),
+      createdAt: now,
+      updatedAt: now,
+      firstName: nameParts.firstName,
+      lastName: nameParts.lastName,
+      fullName: this.buildFullName(nameParts.firstName, nameParts.lastName, member.fullName),
+      identificationTypeId: member.identificationTypeId,
+      identification: member.identification,
+      phone: member.phone,
+      email: member.email,
+      nationalityId: member.nationalityId,
+      medicalNotes: member.specialSituations,
+    };
+    this.clients.push(created);
+    return created;
+  }
+
   async updateTripMember(
     tripId: string,
     memberId: string,
@@ -574,11 +705,23 @@ export class MockOpsRepo implements IOpsRepo {
       return null;
     }
 
-    const updated: TripMember = {
+    const updatedBase: TripMember = {
       ...this.tripMembers[index],
       ...patch,
       updatedAt: nowIso(),
     };
+
+    let updated = updatedBase;
+    const hasClient = updated.clientId
+      ? this.clients.some((client) => client.id === updated.clientId)
+      : false;
+    const shouldEnsureClient =
+      updated.contractsStatus === ContractsStatus.SENT && (!updated.clientId || !hasClient);
+
+    if (shouldEnsureClient) {
+      const client = this.upsertClientFromMember(updated);
+      updated = { ...updated, clientId: client.id };
+    }
 
     this.tripMembers[index] = updated;
     return { ...updated };
@@ -599,7 +742,7 @@ export class MockOpsRepo implements IOpsRepo {
     input: CreateTripMemberInput,
   ): Promise<TripMember> {
     const existingCodes = new Set(this.tripMembers.map((member) => member.reservationCode));
-    const member: TripMember = {
+    let member: TripMember = {
       id: makeId("member", ++this.memberCounter),
       tripId,
       enteredByUserId: currentUser.id,
@@ -608,7 +751,14 @@ export class MockOpsRepo implements IOpsRepo {
       updatedAt: nowIso(),
       ...input,
       reservationCode: makeUniqueReservationCode(existingCodes),
+      clientId: input.clientId ?? null,
+      billingTotalAmount: input.billingTotalAmount ?? null,
     };
+
+    if (member.contractsStatus === ContractsStatus.SENT) {
+      const client = this.upsertClientFromMember(member);
+      member = { ...member, clientId: client.id };
+    }
 
     this.tripMembers.push(member);
     return { ...member };
@@ -694,6 +844,94 @@ export class MockOpsRepo implements IOpsRepo {
 
   async listCatalog(catalogName: CatalogName): Promise<CatalogItem[]> {
     return this.catalogs[catalogName].map((item) => ({ ...item }));
+  }
+
+  async listClients(): Promise<Client[]> {
+    return this.clients.map((client) => ({ ...client }));
+  }
+
+  async listClientPurchases(clientId: string): Promise<ClientPurchase[]> {
+    const items = this.tripMembers.filter((member) => member.clientId === clientId);
+    const mapped = items.map((member) => {
+      const trip = this.trips.find((entry) => entry.id === member.tripId);
+      return {
+        tripId: member.tripId,
+        tripName: trip?.name ?? "-",
+        tripDateFrom: trip?.dateFrom ?? "",
+        tripDateTo: trip?.dateTo ?? "",
+        memberId: member.id,
+        reservationCode: member.reservationCode,
+        contractsStatus: member.contractsStatus,
+        contractsSentAt: member.contractsSentAt,
+        billingStatus: member.billingStatus,
+        totalAmount: member.billingTotalAmount ?? null,
+        createdAt: member.createdAt,
+      };
+    });
+    return mapped.sort((a, b) => (b.contractsSentAt ?? b.createdAt).localeCompare(a.contractsSentAt ?? a.createdAt));
+  }
+
+  async createClient(input: CreateClientInput): Promise<Client> {
+    const now = nowIso();
+    const firstName = input.firstName ?? "";
+    const lastName = input.lastName ?? "";
+    const fullName = this.buildFullName(firstName, lastName, input.fullName ?? "");
+    const client: Client = {
+      id: makeId("client", ++this.clientCounter),
+      createdAt: now,
+      updatedAt: now,
+      ...input,
+      firstName,
+      lastName,
+      fullName,
+      identificationTypeId: input.identificationTypeId ?? "",
+      identification: input.identification ?? "",
+      phone: input.phone ?? "",
+      email: input.email ?? "",
+      nationalityId: input.nationalityId ?? "",
+      medicalNotes: input.medicalNotes ?? "",
+    };
+
+    this.clients.push(client);
+    return { ...client };
+  }
+
+  async updateClient(clientId: string, patch: UpdateClientPatch): Promise<Client | null> {
+    const index = this.clients.findIndex((client) => client.id === clientId);
+    if (index === -1) {
+      return null;
+    }
+
+    const current = this.clients[index];
+    const nextFirstName = patch.firstName ?? current.firstName;
+    const nextLastName = patch.lastName ?? current.lastName;
+    const nextFullName = this.buildFullName(
+      nextFirstName,
+      nextLastName,
+      patch.fullName ?? current.fullName,
+    );
+    const updated: Client = {
+      ...current,
+      ...patch,
+      firstName: nextFirstName,
+      lastName: nextLastName,
+      fullName: nextFullName,
+      updatedAt: nowIso(),
+    };
+    this.clients[index] = updated;
+    return { ...updated };
+  }
+
+  async deleteClient(clientId: string): Promise<boolean> {
+    const index = this.clients.findIndex((client) => client.id === clientId);
+    if (index === -1) {
+      return false;
+    }
+    this.clients.splice(index, 1);
+    this.tripMembers = this.tripMembers.map((member) =>
+      member.clientId === clientId ? { ...member, clientId: null, updatedAt: nowIso() } : member,
+    );
+    return true;
   }
 
   async listLeads(): Promise<Lead[]> {

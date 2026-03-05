@@ -1,8 +1,11 @@
 import type {
   CatalogItem,
   CatalogName,
+  Client,
+  ClientPurchase,
   ContractModificationRequest,
   CreateContractModificationInput,
+  CreateClientInput,
   CreateTripInput,
   CreateLeadInput,
   CreateTripMemberInput,
@@ -23,15 +26,23 @@ import type {
   UpdatePayrollRoleConfig,
   UpdateContractModificationPatch,
   UpdateCatalogItemPatch,
+  UpdateClientPatch,
+  UpdateBillingConfig,
   UpdateLeadPatch,
   UpdateTripMemberPatch,
 } from "../types/ops";
+import type { BillingConfig } from "../types/ops";
 import { MockOpsRepo } from "./mockOpsRepo";
 
 export interface IOpsRepo {
   listTrips(): Promise<Trip[]>;
   getTrip(id: string): Promise<Trip | null>;
   listTripMembers(tripId: string): Promise<TripMember[]>;
+  listClients(): Promise<Client[]>;
+  listClientPurchases(clientId: string): Promise<ClientPurchase[]>;
+  createClient(input: CreateClientInput): Promise<Client>;
+  updateClient(clientId: string, patch: UpdateClientPatch): Promise<Client | null>;
+  deleteClient(clientId: string): Promise<boolean>;
   listContractsQueue(): Promise<TripMember[]>;
   listContractModifications(): Promise<ContractModificationRequest[]>;
   listTimePunches(): Promise<TimePunch[]>;
@@ -39,6 +50,8 @@ export interface IOpsRepo {
   updatePayrollRoleConfig(config: UpdatePayrollRoleConfig): Promise<PayrollRoleConfig>;
   getPayrollGlobalConfig(): Promise<PayrollGlobalConfig>;
   updatePayrollGlobalConfig(config: UpdatePayrollGlobalConfig): Promise<PayrollGlobalConfig>;
+  getBillingConfig(): Promise<BillingConfig>;
+  updateBillingConfig(config: UpdateBillingConfig): Promise<BillingConfig>;
   listHolidayDates(): Promise<HolidayDate[]>;
   addHolidayDate(input: CreateHolidayDateInput): Promise<HolidayDate>;
   deleteHolidayDate(id: string): Promise<boolean>;

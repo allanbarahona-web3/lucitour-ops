@@ -39,6 +39,9 @@ export const AppShell = ({ children }: AppShellProps) => {
       if (path.startsWith("/my-queue")) {
         return true;
       }
+      if (path.startsWith("/clients")) {
+        return true;
+      }
       if (path === "/trips") {
         return true;
       }
@@ -67,6 +70,9 @@ export const AppShell = ({ children }: AppShellProps) => {
     }
     if (path.startsWith("/leads")) {
       return role === Role.ADMIN || role === Role.SUPERVISOR;
+    }
+    if (path.startsWith("/clients")) {
+      return true;
     }
     if (path.startsWith("/my-queue")) {
       return role === Role.ADMIN || role === Role.SUPERVISOR || role === Role.VIEWER;

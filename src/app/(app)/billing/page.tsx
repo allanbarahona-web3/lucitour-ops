@@ -1,29 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getOpsRepo } from "@/lib/data/opsRepo";
-import { useSession } from "@/lib/auth/sessionContext";
-import { BillingStatus, type Trip, type TripMember } from "@/lib/types/ops";
+import { Button } from "../../../components/ui/button";
+import { getOpsRepo } from "../../../lib/data/opsRepo";
+import { useSession } from "../../../lib/auth/sessionContext";
+import { BillingStatus, type Trip, type TripMember } from "../../../lib/types/ops";
 
 type RowItem = {
   member: TripMember;
   trip: Trip | null;
-};
-
-const formatDate = (value?: string | null) => {
-  if (!value) {
-    return "-";
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return parsed.toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
 };
 
 export default function BillingPage() {
@@ -159,70 +144,67 @@ export default function BillingPage() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Clientes</CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-auto">
-          {isLoading ? (
-            <p className="text-sm text-slate-600">Cargando...</p>
-          ) : filteredRows.length === 0 ? (
-            <p className="text-sm text-slate-500">Sin enviados</p>
-          ) : (
-            <table className="min-w-[1200px] w-full border-collapse text-sm">
-              <thead className="bg-slate-50 text-left text-xs text-slate-600">
-                <tr>
-                  <th className="px-3 py-2">Nombre</th>
-                  <th className="px-3 py-2">ID</th>
-                  <th className="px-3 py-2">Reserva</th>
-                  <th className="px-3 py-2">Cotizacion</th>
-                  <th className="px-3 py-2">Monto USD</th>
-                  <th className="px-3 py-2">Monto CRC</th>
-                  <th className="px-3 py-2">Enviado por</th>
-                  <th className="px-3 py-2">Fecha envio</th>
-                  <th className="px-3 py-2">Actualizado</th>
-                  <th className="px-3 py-2">Viaje</th>
+      {isLoading ? (
+        <p className="text-sm text-slate-600">Cargando...</p>
+      ) : filteredRows.length === 0 ? (
+        <p className="text-sm text-slate-500">Sin enviados</p>
+      ) : (
+        <div className="overflow-auto rounded-lg border border-slate-200 bg-white">
+          <table className="min-w-[1200px] w-full border-collapse text-sm">
+            <thead className="bg-slate-50 text-left text-xs text-slate-600">
+              <tr>
+                <th className="px-3 py-2">Nombre</th>
+                <th className="px-3 py-2">ID</th>
+                <th className="px-3 py-2">Reserva</th>
+                <th className="px-3 py-2">Cotizacion</th>
+                <th className="px-3 py-2">Monto USD</th>
+                <th className="px-3 py-2">Monto CRC</th>
+                <th className="px-3 py-2">Enviado por</th>
+                <th className="px-3 py-2">Fecha envio</th>
+                <th className="px-3 py-2">Actualizado</th>
+                <th className="px-3 py-2">Viaje</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRows.map(({ member, trip }) => (
+                <tr key={member.id} className="border-t border-slate-100">
+                  <td className="px-3 py-2 text-slate-900">{member.fullName}</td>
+                  <td className="px-3 py-2 text-slate-600">{member.identification || "-"}</td>
+                  <td className="px-3 py-2 text-slate-600">{member.reservationCode}</td>
+                  <td className="px-3 py-2 text-slate-600">{member.quoteCode || "-"}</td>
+                  <td className="px-3 py-2 text-slate-600">
+                    <input
+                      className="w-32 rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-900"
+                      type="number"
+                      min={0}
+                      value={member.billingTotalAmount ?? ""}
+                      onChange={(event) => scheduleAmountUpdate(member, event.target.value)}
+                      placeholder="0"
+                    />
+                  </td>
+                  <td className={`px-3 py-2 text-xs font-semibold ${rateColorClass}`}>
+                    {member.billingTotalAmount !== null
+                      ? `CRC ${(member.billingTotalAmount * effectiveRate).toFixed(2)} ${rateLabel}`
+                      : "-"}
+                  </td>
+                  <td className="px-3 py-2 text-slate-600">
+                    {member.billingSentByUserId ? userById.get(member.billingSentByUserId) ?? "-" : "-"}
+                  </td>
+                  <td className="px-3 py-2 text-slate-600">
+                    {member.billingSentAt ? new Date(member.billingSentAt).toLocaleString() : "-"}
+                  </td>
+                  <td className="px-3 py-2 text-slate-600">
+                    {member.billingStatusUpdatedAt
+                      ? new Date(member.billingStatusUpdatedAt).toLocaleString()
+                      : "-"}
+                  </td>
+                  <td className="px-3 py-2 text-slate-600">{trip ? trip.name : "-"}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {filteredRows.map(({ member, trip }) => (
-                  <tr key={member.id} className="border-t border-slate-100">
-                    <td className="px-3 py-2 text-slate-900">{member.fullName}</td>
-                    <td className="px-3 py-2 text-slate-600">{member.identification || "-"}</td>
-                    <td className="px-3 py-2 text-slate-600">{member.reservationCode}</td>
-                    <td className="px-3 py-2 text-slate-600">{member.quoteCode || "-"}</td>
-                    <td className="px-3 py-2 text-slate-600">
-                      <input
-                        className="w-32 rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-900"
-                        type="number"
-                        min={0}
-                        value={member.billingTotalAmount ?? ""}
-                        onChange={(event) => scheduleAmountUpdate(member, event.target.value)}
-                        placeholder="0"
-                      />
-                    </td>
-                    <td className={`px-3 py-2 text-xs font-semibold ${rateColorClass}`}>
-                      {member.billingTotalAmount !== null
-                        ? `CRC ${(member.billingTotalAmount * effectiveRate).toFixed(2)} ${rateLabel}`
-                        : "-"}
-                    </td>
-                    <td className="px-3 py-2 text-slate-600">
-                      {member.billingSentByUserId
-                        ? userById.get(member.billingSentByUserId) ?? "-"
-                        : "-"}
-                    </td>
-                    <td className="px-3 py-2 text-slate-600">{formatDate(member.billingSentAt)}</td>
-                    <td className="px-3 py-2 text-slate-600">
-                      {formatDate(member.billingStatusUpdatedAt)}
-                    </td>
-                    <td className="px-3 py-2 text-slate-600">{trip ? trip.name : "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </CardContent>
-      </Card>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
