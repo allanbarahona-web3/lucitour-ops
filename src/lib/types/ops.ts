@@ -285,6 +285,11 @@ export interface Lead {
   notes: string;
   quoteDestination: string;
   quoteTravelMonth: string;
+  quoteTravelDateFrom: string;
+  quoteTravelDateTo: string;
+  quotePartySize: number | null;
+  quoteDraft: QuoteDraft | null;
+  quoteDraftUpdatedAt: string | null;
   quoteStatus: QuoteStatus;
   quoteCode: string;
   quoteTakenByUserId: string | null;
@@ -296,6 +301,40 @@ export interface Lead {
   quoteLostAt: string | null;
   quoteTripId: string | null;
   quoteTripMemberId: string | null;
+}
+
+export type QuoteDraftSectionId = "lodging" | "flights" | "tours" | "transfers" | "extras";
+
+export interface QuoteDraftItem {
+  id: string;
+  label: string;
+  quantity: number | null;
+  unitPrice: number | null;
+  selected: boolean;
+}
+
+export interface QuoteDraftSection {
+  id: QuoteDraftSectionId;
+  title: string;
+  items: QuoteDraftItem[];
+}
+
+export interface QuoteLodgingStay {
+  id: string;
+  city: string;
+  nights: number | null;
+  lodgingType: string;
+  accommodation: string;
+  mealPlan: string;
+  detail: string;
+  pricePerNight: number | null;
+}
+
+export interface QuoteDraft {
+  sections: QuoteDraftSection[];
+  lodgingStays: QuoteLodgingStay[];
+  notes: string;
+  validUntil: string;
 }
 
 export interface Client {
@@ -393,6 +432,11 @@ export type CreateLeadInput = Omit<
   | "updatedAt"
   | "agentUserId"
   | "quoteCode"
+  | "quoteDraft"
+  | "quoteDraftUpdatedAt"
+  | "quoteTravelDateFrom"
+  | "quoteTravelDateTo"
+  | "quotePartySize"
   | "quoteTakenByUserId"
   | "quoteTakenAt"
   | "quoteStatusUpdatedAt"
@@ -405,6 +449,11 @@ export type CreateLeadInput = Omit<
 > & {
   agentUserId?: string;
   quoteCode?: string;
+  quoteDraft?: QuoteDraft | null;
+  quoteDraftUpdatedAt?: string | null;
+  quoteTravelDateFrom?: string;
+  quoteTravelDateTo?: string;
+  quotePartySize?: number | null;
   quoteTakenByUserId?: string | null;
   quoteTakenAt?: string | null;
   quoteStatusUpdatedAt?: string | null;

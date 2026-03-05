@@ -435,7 +435,7 @@ export default function ClientsPage() {
           }
         }}
       >
-        <DialogContent className="w-[95vw] max-w-6xl">
+        <DialogContent className="w-[98vw] max-w-7xl">
           <DialogHeader>
             <DialogTitle>
               Historial de {historyDialog.client ? getClientName(historyDialog.client) : "cliente"}
@@ -446,8 +446,8 @@ export default function ClientsPage() {
           ) : historyItems.length === 0 ? (
             <p className="text-sm text-slate-600">Sin compras registradas.</p>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-              <table className="min-w-[800px] w-full border-collapse text-xs">
+            <div className="rounded-lg border border-slate-200 bg-white">
+              <table className="w-full border-collapse text-xs">
                 <thead className="bg-slate-50 text-left text-slate-600">
                   <tr>
                     <th className="px-3 py-2">Reserva</th>
@@ -462,7 +462,7 @@ export default function ClientsPage() {
                 <tbody>
                   {historyItems.map((item) => (
                     <tr key={item.memberId} className="border-t border-slate-100">
-                      <td className="px-3 py-2 text-slate-600">
+                      <td className="px-3 py-2 text-slate-600 break-words">
                         <Link
                           href={`/trips/${item.tripId}?focus=${item.memberId}`}
                           className="font-semibold text-cyan-700 hover:underline"
@@ -470,7 +470,7 @@ export default function ClientsPage() {
                           {item.reservationCode}
                         </Link>
                       </td>
-                      <td className="px-3 py-2 text-slate-600">{item.tripName}</td>
+                      <td className="px-3 py-2 text-slate-600 break-words">{item.tripName}</td>
                       <td className="px-3 py-2 text-slate-600">
                         {item.tripDateFrom} - {item.tripDateTo}
                       </td>

@@ -1,14 +1,17 @@
 import type { HTMLAttributes } from "react";
 
 export const Card = ({ className = "", ...props }: HTMLAttributes<HTMLDivElement>) => (
-  <div className={`rounded-lg border border-slate-200 bg-white ${className}`} {...props} />
+  <div
+    className={`rounded-xl border border-slate-200/80 bg-white shadow-sm ${className}`}
+    {...props}
+  />
 );
 
 export const CardHeader = ({
   className = "",
   ...props
 }: HTMLAttributes<HTMLDivElement>) => (
-  <div className={`border-b border-slate-100 px-4 py-3 ${className}`} {...props} />
+  <div className={`border-b border-slate-100/80 px-4 py-3 ${className}`} {...props} />
 );
 
 export const CardTitle = ({

@@ -46,7 +46,27 @@ const navItems = [
     badgeKey: "modifications",
   },
   { href: "/accounting", label: "Contabilidad", roles: ["ADMIN", "ACCOUNTING"] as Role[] },
-  { href: "/quotes", label: "Cotizaciones", roles: ["ADMIN", "QUOTES"] as Role[] },
+  {
+    href: "/quotes",
+    label: "Cotizaciones",
+    roles: ["ADMIN", "QUOTES"] as Role[],
+    badgeKey: "quotes",
+  },
+  {
+    href: "/won-quotes",
+    label: "Cotizaciones ganadas",
+    roles: [
+      "ADMIN",
+      "AGENT",
+      "SUPERVISOR",
+      "ACCOUNTING",
+      "CONTRACTS",
+      "QUOTES",
+      "BILLING",
+      "VIEWER",
+    ] as Role[],
+    badgeKey: "won-quotes",
+  },
   { href: "/billing", label: "Facturacion", roles: ["ADMIN", "BILLING", "ACCOUNTING"] as Role[] },
   { href: "/admin/users", label: "Usuarios", roles: ["ADMIN"] as Role[] },
   { href: "/admin/catalogs", label: "Catalogos", roles: ["ADMIN"] as Role[] },
@@ -55,12 +75,19 @@ const navItems = [
 interface SidebarProps {
   role: Role;
   modificationCount?: number;
+  quoteCount?: number;
+  wonQuoteCount?: number;
 }
 
 const isActive = (pathname: string, href: string) =>
   pathname === href || (pathname.startsWith(href) && href !== "/");
 
-export const Sidebar = ({ role, modificationCount = 0 }: SidebarProps) => {
+export const Sidebar = ({
+  role,
+  modificationCount = 0,
+  quoteCount = 0,
+  wonQuoteCount = 0,
+}: SidebarProps) => {
   const pathname = usePathname();
 
   const items = navItems.filter((item) => item.roles.includes(role));
@@ -69,15 +96,18 @@ export const Sidebar = ({ role, modificationCount = 0 }: SidebarProps) => {
     <nav className="flex flex-col gap-2">
       {items.map((item) => {
         const active = isActive(pathname, item.href);
-        const showBadge = item.badgeKey === "modifications" && modificationCount > 0;
+        const showBadge =
+          (item.badgeKey === "modifications" && modificationCount > 0) ||
+          (item.badgeKey === "quotes" && quoteCount > 0) ||
+          (item.badgeKey === "won-quotes" && wonQuoteCount > 0);
         return (
           <Link
             key={item.href}
             href={item.href}
             className={`flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition ${
               active
-                ? "bg-slate-900 text-white"
-                : "text-slate-700 hover:bg-slate-100"
+                ? "bg-blue-700 text-white"
+                : "text-slate-700 hover:bg-slate-100/70"
             }`}
           >
             <span>{item.label}</span>
@@ -93,7 +123,7 @@ export const Sidebar = ({ role, modificationCount = 0 }: SidebarProps) => {
   return (
     <>
       <aside className="hidden h-full w-64 flex-col border-r border-slate-200 bg-white px-4 py-6 md:flex">
-        <div className="mb-6 text-xl font-semibold text-cyan-600">OPS - LUCITOUR</div>
+        <div className="mb-6 text-xl font-semibold text-blue-700">OPS - LUCITOUR</div>
         {renderLinks()}
       </aside>
 
@@ -105,7 +135,7 @@ export const Sidebar = ({ role, modificationCount = 0 }: SidebarProps) => {
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="w-72">
-            <div className="mb-6 text-xl font-semibold text-cyan-600">OPS - LUCITOUR</div>
+            <div className="mb-6 text-xl font-semibold text-blue-700">OPS - LUCITOUR</div>
             {renderLinks()}
           </SheetContent>
         </Sheet>

@@ -9,8 +9,8 @@ interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
 }
 
 const variantStyles: Record<BadgeVariant, string> = {
-  default: "bg-slate-900 text-white",
-  secondary: "bg-slate-200 text-slate-800",
+  default: "bg-blue-700 text-white",
+  secondary: "bg-slate-100 text-slate-700",
 };
 
 export const Badge = ({

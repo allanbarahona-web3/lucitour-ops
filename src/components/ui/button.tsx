@@ -12,9 +12,9 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantStyles: Record<ButtonVariant, string> = {
-  default: "bg-slate-900 text-white hover:bg-slate-800",
-  outline: "border border-slate-300 text-slate-900 hover:bg-slate-100",
-  secondary: "bg-slate-200 text-slate-900 hover:bg-slate-300",
+  default: "bg-blue-700 text-white hover:bg-blue-800",
+  outline: "border border-slate-300 text-slate-700 hover:bg-slate-100",
+  secondary: "bg-slate-100 text-slate-700 hover:bg-slate-200",
 };
 
 const sizeStyles: Record<ButtonSize, string> = {

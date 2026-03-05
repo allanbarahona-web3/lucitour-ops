@@ -7,7 +7,7 @@ import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { useSession } from "../../lib/auth/sessionContext";
 import { getOpsRepo } from "../../lib/data/opsRepo";
-import { ContractModificationStatus, Role, TimePunchType } from "../../lib/types/ops";
+import { ContractModificationStatus, QuoteStatus, Role, TimePunchType } from "../../lib/types/ops";
 import { Button } from "../ui/button";
 
 interface AppShellProps {
@@ -20,6 +20,8 @@ export const AppShell = ({ children }: AppShellProps) => {
   const pathname = usePathname();
   const repo = useMemo(() => getOpsRepo(), []);
   const [modificationCount, setModificationCount] = useState(0);
+  const [quoteCount, setQuoteCount] = useState(0);
+  const [wonQuoteCount, setWonQuoteCount] = useState(0);
   const [hasStartedShift, setHasStartedShift] = useState(true);
   const [isCheckingShift, setIsCheckingShift] = useState(false);
   const [isPunching, setIsPunching] = useState(false);
@@ -37,6 +39,9 @@ export const AppShell = ({ children }: AppShellProps) => {
   const canAccessRoute = (path: string, role: Role) => {
     if (role === Role.AGENT) {
       if (path.startsWith("/my-queue")) {
+        return true;
+      }
+      if (path.startsWith("/won-quotes")) {
         return true;
       }
       if (path.startsWith("/clients")) {
@@ -61,6 +66,9 @@ export const AppShell = ({ children }: AppShellProps) => {
     }
     if (path.startsWith("/quotes")) {
       return role === Role.ADMIN || role === Role.QUOTES;
+    }
+    if (path.startsWith("/won-quotes")) {
+      return true;
     }
     if (path.startsWith("/billing")) {
       return role === Role.ADMIN || role === Role.BILLING || role === Role.ACCOUNTING;
@@ -132,6 +140,39 @@ export const AppShell = ({ children }: AppShellProps) => {
     void loadModifications();
   }, [repo, user.role]);
 
+  useEffect(() => {
+    if (user.role !== Role.QUOTES && user.role !== Role.ADMIN) {
+      setQuoteCount(0);
+      return;
+    }
+
+    const loadQuotes = async () => {
+      const leads = await repo.listLeads();
+      const pendingCount = leads.filter((lead) => lead.quoteStatus === QuoteStatus.SENT).length;
+      setQuoteCount(pendingCount);
+    };
+
+    void loadQuotes();
+    const interval = setInterval(loadQuotes, 15000);
+    return () => clearInterval(interval);
+  }, [repo, user.role]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !isReady) {
+      return;
+    }
+
+    const loadWonQuotes = async () => {
+      const leads = await repo.listLeads();
+      const wonCount = leads.filter((lead) => lead.quoteStatus === QuoteStatus.WON).length;
+      setWonQuoteCount(wonCount);
+    };
+
+    void loadWonQuotes();
+    const interval = setInterval(loadWonQuotes, 15000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, isReady, repo]);
+
   const handleStartShift = async () => {
     if (isPunching) {
       return;
@@ -159,7 +200,12 @@ export const AppShell = ({ children }: AppShellProps) => {
     <>
       {!isReady || !isAuthenticated ? null : (
         <div className="flex min-h-screen flex-col bg-slate-50 md:flex-row">
-          <Sidebar role={user.role} modificationCount={modificationCount} />
+          <Sidebar
+            role={user.role}
+            modificationCount={modificationCount}
+            quoteCount={quoteCount}
+            wonQuoteCount={wonQuoteCount}
+          />
           <div className="flex flex-1 flex-col">
             <Topbar user={user} />
             <main className="flex-1 p-6">{children}</main>

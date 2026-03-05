@@ -343,6 +343,11 @@ export class MockOpsRepo implements IOpsRepo {
       notes: "Interesado en mayo, quiere informacion.",
       quoteDestination: "",
       quoteTravelMonth: "",
+      quoteTravelDateFrom: "",
+      quoteTravelDateTo: "",
+      quotePartySize: null,
+      quoteDraft: null,
+      quoteDraftUpdatedAt: null,
       quoteStatus: QuoteStatus.PENDING,
       quoteCode: "",
       quoteTakenByUserId: null,
@@ -949,8 +954,13 @@ export class MockOpsRepo implements IOpsRepo {
       ...input,
       quoteDestination: input.quoteDestination ?? "",
       quoteTravelMonth: input.quoteTravelMonth ?? "",
+      quoteTravelDateFrom: input.quoteTravelDateFrom ?? "",
+      quoteTravelDateTo: input.quoteTravelDateTo ?? "",
+      quotePartySize: input.quotePartySize ?? null,
       quoteStatus: input.quoteStatus ?? QuoteStatus.PENDING,
       quoteCode: input.quoteCode ?? "",
+      quoteDraft: input.quoteDraft ?? null,
+      quoteDraftUpdatedAt: input.quoteDraftUpdatedAt ?? null,
       quoteTakenByUserId: input.quoteTakenByUserId ?? null,
       quoteTakenAt: input.quoteTakenAt ?? null,
       quoteStatusUpdatedAt: input.quoteStatusUpdatedAt ?? now,
@@ -1003,6 +1013,10 @@ export class MockOpsRepo implements IOpsRepo {
       if (patch.quoteStatus === QuoteStatus.LOST) {
         updated.quoteLostAt = patch.quoteLostAt ?? now;
       }
+    }
+
+    if (patch.quoteDraft !== undefined) {
+      updated.quoteDraftUpdatedAt = patch.quoteDraftUpdatedAt ?? now;
     }
 
     if (!updated.quoteCode && updated.quoteStatus !== QuoteStatus.PENDING) {

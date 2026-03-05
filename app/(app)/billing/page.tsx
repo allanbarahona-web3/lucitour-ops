@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getOpsRepo } from "@/lib/data/opsRepo";
 import { useSession } from "@/lib/auth/sessionContext";
-import { BillingStatus, type Trip, type TripMember } from "@/lib/types/ops";
+import { BillingStatus, QuoteStatus, type Trip, type TripMember } from "@/lib/types/ops";
 
 type RowItem = {
   member: TripMember;
@@ -34,6 +35,7 @@ export default function BillingPage() {
   const [query, setQuery] = useState("");
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const [exchangeRate, setExchangeRate] = useState(500);
+  const [wonQuoteCount, setWonQuoteCount] = useState(0);
 
   const userById = useMemo(() => {
     const map = new Map<string, string>();
@@ -44,11 +46,13 @@ export default function BillingPage() {
   useEffect(() => {
     const loadRows = async () => {
       setIsLoading(true);
-      const [trips, billingConfig] = await Promise.all([
+      const [trips, billingConfig, leads] = await Promise.all([
         repo.listTrips(),
         repo.getBillingConfig(),
+        repo.listLeads(),
       ]);
       setExchangeRate(billingConfig.exchangeRate);
+      setWonQuoteCount(leads.filter((lead) => lead.quoteStatus === QuoteStatus.WON).length);
       const tripMap = trips.reduce<Record<string, Trip>>((acc, trip) => {
         acc[trip.id] = trip;
         return acc;
@@ -158,6 +162,21 @@ export default function BillingPage() {
           </Button>
         </div>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Cotizaciones ganadas</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm text-slate-600">Pendientes de seguimiento y facturacion.</p>
+            <p className="text-2xl font-semibold text-slate-900">{wonQuoteCount}</p>
+          </div>
+          <Link className="text-sm font-medium text-cyan-700 hover:underline" href="/won-quotes">
+            Ver listado
+          </Link>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

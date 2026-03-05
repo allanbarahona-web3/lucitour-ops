@@ -12,7 +12,7 @@ interface TopbarProps {
 }
 
 export const Topbar = ({ user }: TopbarProps) => (
-  <header className="flex w-full items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
+  <header className="flex w-full items-center justify-between gap-4 border-b border-slate-200/70 bg-white/80 px-4 py-3 shadow-sm backdrop-blur">
     <div className="text-sm font-semibold text-slate-900">Dashboard</div>
     <TopbarControls user={user} />
   </header>
