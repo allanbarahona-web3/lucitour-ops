@@ -27,6 +27,7 @@ export enum Role {
   CONTRACTS = "CONTRACTS",
   QUOTES = "QUOTES",
   BILLING = "BILLING",
+  PURCHASES = "PURCHASES",
   VIEWER = "VIEWER",
 }
 

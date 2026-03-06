@@ -26,6 +26,7 @@ const roleStyles: Record<Role, string> = {
   CONTRACTS: "bg-amber-100 text-amber-800",
   QUOTES: "bg-indigo-100 text-indigo-800",
   BILLING: "bg-teal-100 text-teal-800",
+  PURCHASES: "bg-lime-100 text-lime-800",
   VIEWER: "bg-slate-200 text-slate-700",
 };
 

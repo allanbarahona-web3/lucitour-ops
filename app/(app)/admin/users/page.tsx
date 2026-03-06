@@ -14,6 +14,7 @@ const roleLabels: Record<Role, string> = {
   [Role.CONTRACTS]: "Contratos",
   [Role.QUOTES]: "Cotizaciones",
   [Role.BILLING]: "Facturacion",
+  [Role.PURCHASES]: "Compras",
   [Role.VIEWER]: "Viewer",
 };
 

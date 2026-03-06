@@ -68,6 +68,27 @@ const navItems = [
     badgeKey: "won-quotes",
   },
   { href: "/billing", label: "Facturacion", roles: ["ADMIN", "BILLING", "ACCOUNTING"] as Role[] },
+  { href: "/purchases", label: "Compras", roles: ["ADMIN", "PURCHASES"] as Role[] },
+  {
+    href: "/purchases/flights",
+    label: "Vuelos",
+    roles: ["ADMIN", "PURCHASES"] as Role[],
+  },
+  {
+    href: "/purchases/insurances",
+    label: "Seguros",
+    roles: ["ADMIN", "PURCHASES"] as Role[],
+  },
+  {
+    href: "/purchases/upsells",
+    label: "Upsells",
+    roles: ["ADMIN", "PURCHASES"] as Role[],
+  },
+  {
+    href: "/purchases/check-in",
+    label: "Check-in aereo",
+    roles: ["ADMIN", "PURCHASES"] as Role[],
+  },
   { href: "/admin/users", label: "Usuarios", roles: ["ADMIN"] as Role[] },
   { href: "/admin/catalogs", label: "Catalogos", roles: ["ADMIN"] as Role[] },
 ];

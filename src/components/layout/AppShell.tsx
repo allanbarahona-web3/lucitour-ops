@@ -27,6 +27,28 @@ export const AppShell = ({ children }: AppShellProps) => {
   const [isPunching, setIsPunching] = useState(false);
   const [punchError, setPunchError] = useState<string | null>(null);
 
+  const getHomeRoute = (role: Role) => {
+    switch (role) {
+      case Role.ADMIN:
+        return "/admin/dashboard";
+      case Role.CONTRACTS:
+        return "/contracts";
+      case Role.ACCOUNTING:
+        return "/accounting";
+      case Role.QUOTES:
+        return "/quotes";
+      case Role.BILLING:
+        return "/billing";
+      case Role.PURCHASES:
+        return "/purchases";
+      case Role.AGENT:
+      case Role.SUPERVISOR:
+      case Role.VIEWER:
+      default:
+        return "/my-queue";
+    }
+  };
+
   useEffect(() => {
     if (!isReady) {
       return;
@@ -72,6 +94,9 @@ export const AppShell = ({ children }: AppShellProps) => {
     }
     if (path.startsWith("/billing")) {
       return role === Role.ADMIN || role === Role.BILLING || role === Role.ACCOUNTING;
+    }
+    if (path.startsWith("/purchases")) {
+      return role === Role.ADMIN || role === Role.PURCHASES;
     }
     if (path.startsWith("/trips")) {
       return role === Role.ADMIN || role === Role.SUPERVISOR;
@@ -119,7 +144,7 @@ export const AppShell = ({ children }: AppShellProps) => {
       return;
     }
     if (!canAccessRoute(pathname, user.role)) {
-      router.replace("/my-queue");
+      router.replace(getHomeRoute(user.role));
     }
   }, [isAuthenticated, isReady, pathname, router, user.role]);
 

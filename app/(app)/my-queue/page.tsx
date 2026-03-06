@@ -11,6 +11,7 @@ import {
   ContractsStatus,
   ContractStatus,
   DocsStatus,
+  ItineraryStatus,
   PassportStatus,
   QuoteStatus,
   type Trip,
@@ -23,6 +24,8 @@ const groupLabels = {
 } as const;
 
 type QueueGroupKey = keyof typeof groupLabels;
+
+type DashboardCardKey = QueueGroupKey | "sent" | "quotes" | "billing" | "boardingPasses";
 
 type QueueItem = {
   key: QueueGroupKey;
@@ -61,6 +64,7 @@ export default function MyQueuePage() {
   const [contractItems, setContractItems] = useState<TripMember[]>([]);
   const [quoteCount, setQuoteCount] = useState(0);
   const [billingCount, setBillingCount] = useState(0);
+  const [boardingPassCount, setBoardingPassCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -119,6 +123,14 @@ export default function MyQueuePage() {
           (member) => member.billingStatus === "SENT" && member.assignedToUserId === user.id,
         ).length;
 
+      const nextBoardingPassCount = tripMembersByTrip
+        .flatMap(({ members }) => members)
+        .filter(
+          (member) =>
+            member.itineraryStatus === ItineraryStatus.MISSING &&
+            member.assignedToUserId === user.id,
+        ).length;
+
       const nextQuoteCount = leads.filter(
         (lead) => lead.agentUserId === user.id && lead.quoteStatus !== QuoteStatus.PENDING,
       ).length;
@@ -129,6 +141,7 @@ export default function MyQueuePage() {
       setContractItems(nextContractItems);
       setQuoteCount(nextQuoteCount);
       setBillingCount(nextBillingCount);
+      setBoardingPassCount(nextBoardingPassCount);
       setIsLoading(false);
     };
 
@@ -192,7 +205,12 @@ export default function MyQueuePage() {
               href: "/my-queue/billing",
               count: billingCount,
             },
-          ]).map((item) => (
+            {
+              key: "boardingPasses" as const,
+              href: "/my-queue/boarding-passes",
+              count: boardingPassCount,
+            },
+          ] as Array<{ key: DashboardCardKey; href: string; count: number }>).map((item) => (
             <Link key={item.href} href={item.href} className="block">
               <Card className="h-full transition hover:border-slate-300">
                 <CardHeader>
@@ -203,6 +221,8 @@ export default function MyQueuePage() {
                         ? "Cotizaciones enviadas"
                         : item.key === "billing"
                           ? "Estados de cuenta"
+                          : item.key === "boardingPasses"
+                            ? "Pases de Abordar"
                           : groupLabels[item.key]}
                   </CardTitle>
                 </CardHeader>
