@@ -28,7 +28,7 @@ const tripSchema = z.object({
   dateTo: z.string().min(1, "Fecha fin requerida"),
   maxSeats: z.coerce.number().min(1, "Capacidad requerida"),
   lodgingType: z.enum(["HOTEL", "HOSTEL", "AIRBNB"], {
-    required_error: "Tipo de hospedaje requerido",
+    message: "Tipo de hospedaje requerido",
   }),
   packageBasePrice: z.coerce.number().min(0, "Precio requerido"),
   reservationMinPerPerson: z.coerce.number().min(0, "Reserva minima requerida"),
