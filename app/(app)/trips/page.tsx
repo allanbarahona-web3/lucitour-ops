@@ -27,6 +27,11 @@ const tripSchema = z.object({
   dateFrom: z.string().min(1, "Fecha inicio requerida"),
   dateTo: z.string().min(1, "Fecha fin requerida"),
   maxSeats: z.coerce.number().min(1, "Capacidad requerida"),
+  lodgingType: z.enum(["HOTEL", "HOSTEL", "AIRBNB"], {
+    required_error: "Tipo de hospedaje requerido",
+  }),
+  packageBasePrice: z.coerce.number().min(0, "Precio requerido"),
+  reservationMinPerPerson: z.coerce.number().min(0, "Reserva minima requerida"),
 });
 
 type TripFormValues = z.infer<typeof tripSchema>;
@@ -54,6 +59,9 @@ export default function TripsPage() {
       dateFrom: "",
       dateTo: "",
       maxSeats: 1,
+      lodgingType: "HOTEL",
+      packageBasePrice: 0,
+      reservationMinPerPerson: 0,
     },
   });
   const canViewTrips = [Role.ADMIN, Role.AGENT, Role.SUPERVISOR].includes(user.role);
@@ -154,25 +162,76 @@ export default function TripsPage() {
                     ) : null}
                   </div>
                 </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="lodgingType">Tipo de hospedaje</Label>
+                    <select
+                      id="lodgingType"
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      {...form.register("lodgingType")}
+                    >
+                      <option value="HOTEL">Hotel</option>
+                      <option value="HOSTEL">Hostel</option>
+                      <option value="AIRBNB">Airbnb</option>
+                    </select>
+                    {form.formState.errors.lodgingType ? (
+                      <p className="text-xs text-red-600">
+                        {form.formState.errors.lodgingType.message}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="maxSeats">Capacidad maxima</Label>
+                    <Input
+                      id="maxSeats"
+                      type="number"
+                      min={1}
+                      {...form.register("maxSeats", { valueAsNumber: true })}
+                    />
+                    {form.formState.errors.maxSeats ? (
+                      <p className="text-xs text-red-600">
+                        {form.formState.errors.maxSeats.message}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="packageBasePrice">Precio del paquete (USD)</Label>
+                    <Input
+                      id="packageBasePrice"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      {...form.register("packageBasePrice", { valueAsNumber: true })}
+                    />
+                    {form.formState.errors.packageBasePrice ? (
+                      <p className="text-xs text-red-600">
+                        {form.formState.errors.packageBasePrice.message}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="reservationMinPerPerson">Reserva minima por persona (USD)</Label>
+                    <Input
+                      id="reservationMinPerPerson"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      {...form.register("reservationMinPerPerson", { valueAsNumber: true })}
+                    />
+                    {form.formState.errors.reservationMinPerPerson ? (
+                      <p className="text-xs text-red-600">
+                        {form.formState.errors.reservationMinPerPerson.message}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
                 <div className="flex justify-end gap-2">
                   <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>
                     Cancelar
                   </Button>
                   <Button type="submit">Crear viaje</Button>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="maxSeats">Capacidad maxima</Label>
-                  <Input
-                    id="maxSeats"
-                    type="number"
-                    min={1}
-                    {...form.register("maxSeats", { valueAsNumber: true })}
-                  />
-                  {form.formState.errors.maxSeats ? (
-                    <p className="text-xs text-red-600">
-                      {form.formState.errors.maxSeats.message}
-                    </p>
-                  ) : null}
                 </div>
               </form>
             </DialogContent>
@@ -196,16 +255,63 @@ export default function TripsPage() {
                   </span>
                 ) : null}
               </div>
-              <p className="text-xs text-slate-500">
-                {row.trip.dateFrom} - {row.trip.dateTo}
-              </p>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-600">Pasajeros</span>
-                <span className="font-semibold text-slate-900">
-                  {row.usedSeats} / {row.maxSeats}
-                </span>
+              <div className="grid gap-2 text-sm">
+                <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+                  <span className="text-slate-600">Viaje</span>
+                  <span className="font-semibold text-slate-900">{row.trip.name}</span>
+                </div>
+                <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+                  <span className="text-slate-600">Fechas</span>
+                  <span className="font-semibold text-slate-900">
+                    {row.trip.dateFrom} - {row.trip.dateTo}
+                  </span>
+                </div>
+                <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+                  <span className="text-slate-600">Hospedaje</span>
+                  <span className="font-semibold text-slate-900">
+                    {row.trip.lodgingType === "HOTEL"
+                      ? "Hotel"
+                      : row.trip.lodgingType === "HOSTEL"
+                        ? "Hostel"
+                        : "Airbnb"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+                  <span className="text-slate-600">Precio base</span>
+                  <span className="font-semibold text-slate-900">
+                    USD {row.trip.packageBasePrice.toFixed(2)}
+                  </span>
+                </div>
+                <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+                  <span className="text-slate-600">Reserva minima</span>
+                  <span className="font-semibold text-slate-900">
+                    USD {row.trip.reservationMinPerPerson.toFixed(2)}
+                  </span>
+                </div>
+                <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+                  <span className="text-slate-600">Pasajeros</span>
+                  <span className="font-semibold text-slate-900">
+                    {row.usedSeats} / {row.maxSeats}
+                  </span>
+                </div>
+                <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+                  <span className="text-slate-600">Capacidad</span>
+                  <span
+                    className={`font-semibold ${
+                      row.isClosed ? "text-rose-600" : "text-slate-900"
+                    }`}
+                  >
+                    {row.capacityPercent}%
+                  </span>
+                </div>
+                <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+                  <span className="text-slate-600">Avance</span>
+                  <span className="font-semibold text-slate-900">
+                    {row.completionPercent}%
+                  </span>
+                </div>
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
@@ -229,7 +335,7 @@ export default function TripsPage() {
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-600">Completitud</span>
+                  <span className="text-slate-600">Avance</span>
                   <span className="font-semibold text-slate-900">
                     {row.completionPercent}%
                   </span>

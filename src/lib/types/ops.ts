@@ -55,8 +55,29 @@ export interface PayrollGlobalConfig {
   retentionRate: number;
 }
 
+export interface QuoteMarginRates {
+  flightsInternational: number;
+  flightsDomestic: number;
+  tours: number;
+  lodging: number;
+  transfers: number;
+  extras: number;
+}
+
+export interface QuoteFeeTier {
+  id: string;
+  minPax: number;
+  maxPax: number | null;
+  feePerPax: number;
+}
+
 export interface BillingConfig {
   exchangeRate: number;
+  cardFeeRate: number;
+  vendorCommissionRate: number;
+  taxRate: number;
+  quoteMarginRates: QuoteMarginRates;
+  perPaxFeeTiers: QuoteFeeTier[];
 }
 
 export interface PayrollDeduction {
@@ -151,16 +172,48 @@ export interface DocumentUpload {
   type: DocumentType;
   fileName: string;
   ownerName: string;
+  concept?: string;
+  conceptOther?: string;
 }
 
 export interface Companion {
   id: string;
   fullName: string;
   identification: string;
+  email: string;
+  phone: string;
+  address: string;
+  maritalStatus: MaritalStatus | "";
+  nationalityId: string;
+  profession: string;
   isMinor: boolean;
+  wantsInsurance: boolean | null;
+  insuranceId: string;
+  hasOwnInsurance: boolean | null;
+  emergencyContactName: string;
+  emergencyContactPhone: string;
+  specialSituations: string;
 }
 
 export type TripStatus = "PLANNED" | "ACTIVE" | "COMPLETED" | "CANCELLED";
+
+export type TripLodgingType = "HOTEL" | "HOSTEL" | "AIRBNB";
+
+export type TripAccommodationType =
+  | "TWIN"
+  | "INDIVIDUAL"
+  | "MATRIMONIAL"
+  | "TRIPLE"
+  | "CUADRUPLE";
+
+export type TripLuggageType = "CARRY_ON" | "CHECKED";
+
+export interface TripExtraItem {
+  id: string;
+  label: string;
+  quantity: number | null;
+  unitPrice: number | null;
+}
 
 export interface Trip {
   id: string;
@@ -169,6 +222,9 @@ export interface Trip {
   dateTo: string;
   status: TripStatus;
   maxSeats: number;
+  lodgingType: TripLodgingType;
+  packageBasePrice: number;
+  reservationMinPerPerson: number;
 }
 
 export interface TripMember {
@@ -195,6 +251,18 @@ export interface TripMember {
   itineraryStatus: ItineraryStatus;
   wantsReservation: boolean;
   packageName: string;
+  packageLodgingType: TripLodgingType | "";
+  packageBasePrice: number | null;
+  packageFinalPrice: number | null;
+  reservationMinPerPerson: number | null;
+  reservationFinalPerPerson: number | null;
+  paymentPlanMonths: number | null;
+  accommodationType: TripAccommodationType | "";
+  seatUnitPrice: number | null;
+  luggageType: TripLuggageType | "";
+  luggageQuantity: number | null;
+  luggageUnitPrice: number | null;
+  extraTours: TripExtraItem[];
   address: string;
   maritalStatus: MaritalStatus | "";
   profession: string;
@@ -305,12 +373,20 @@ export interface Lead {
 
 export type QuoteDraftSectionId = "lodging" | "flights" | "tours" | "transfers" | "extras";
 
+export type QuotePriceType = "PER_PERSON" | "PER_GROUP";
+
+export type QuoteFlightType = "INTERNATIONAL" | "DOMESTIC";
+
 export interface QuoteDraftItem {
   id: string;
   label: string;
   quantity: number | null;
   unitPrice: number | null;
   selected: boolean;
+  priceType: QuotePriceType;
+  customPax: number | null;
+  marginRate: number | null;
+  flightType?: QuoteFlightType;
 }
 
 export interface QuoteDraftSection {
@@ -328,6 +404,9 @@ export interface QuoteLodgingStay {
   mealPlan: string;
   detail: string;
   pricePerNight: number | null;
+  priceType: QuotePriceType;
+  customPax: number | null;
+  marginRate: number | null;
 }
 
 export interface QuoteDraft {

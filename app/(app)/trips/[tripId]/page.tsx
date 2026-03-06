@@ -68,6 +68,21 @@ export default function TripDetailPage({ params }: TripDetailPageProps) {
           <p className="text-sm text-slate-600">
             {trip.dateFrom} - {trip.dateTo}
           </p>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-600">
+            <span className="rounded-full bg-slate-100 px-2 py-0.5">
+              Hospedaje: {trip.lodgingType === "HOTEL"
+                ? "Hotel"
+                : trip.lodgingType === "HOSTEL"
+                  ? "Hostel"
+                  : "Airbnb"}
+            </span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5">
+              Precio base: USD {trip.packageBasePrice.toFixed(2)}
+            </span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5">
+              Reserva minima: USD {trip.reservationMinPerPerson.toFixed(2)}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -76,6 +91,9 @@ export default function TripDetailPage({ params }: TripDetailPageProps) {
         tripName={trip.name}
         tripDateFrom={trip.dateFrom}
         tripDateTo={trip.dateTo}
+        tripLodgingType={trip.lodgingType}
+        tripPackageBasePrice={trip.packageBasePrice}
+        tripReservationMinPerPerson={trip.reservationMinPerPerson}
         repo={repo}
         users={users}
         currentUser={user}

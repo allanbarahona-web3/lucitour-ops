@@ -170,6 +170,9 @@ export const QuoteWinDialog = ({
       dateTo: values.dateTo,
       status: "PLANNED",
       maxSeats: values.maxSeats,
+      lodgingType: "HOTEL",
+      packageBasePrice: 0,
+      reservationMinPerPerson: 0,
     });
 
     const payload: CreateTripMemberInput = {
@@ -193,6 +196,18 @@ export const QuoteWinDialog = ({
       details: "",
       wantsReservation: true,
       packageName: lead.quoteDestination || values.tripName,
+      packageLodgingType: "",
+      packageBasePrice: 0,
+      packageFinalPrice: 0,
+      reservationMinPerPerson: 0,
+      reservationFinalPerPerson: 0,
+      paymentPlanMonths: null,
+      accommodationType: "",
+      seatUnitPrice: null,
+      luggageType: "",
+      luggageQuantity: null,
+      luggageUnitPrice: null,
+      extraTours: [],
       address: values.address,
       maritalStatus: (values.maritalStatus as MaritalStatus) || "",
       profession: values.profession,

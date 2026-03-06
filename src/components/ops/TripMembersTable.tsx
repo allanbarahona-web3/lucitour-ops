@@ -15,6 +15,7 @@ import type {
   ContractModificationRequest,
   ContractModificationStep,
   UpdateContractModificationPatch,
+  DocumentUpload,
   DocumentType,
   TripMember,
   UpdateTripMemberPatch,
@@ -71,6 +72,9 @@ interface TripMembersTableProps {
   tripName: string;
   tripDateFrom: string;
   tripDateTo: string;
+  tripLodgingType: TripMember["packageLodgingType"];
+  tripPackageBasePrice: number;
+  tripReservationMinPerPerson: number;
   repo: IOpsRepo;
   users: User[];
   currentUser: User;
@@ -90,6 +94,9 @@ export const TripMembersTable = ({
   tripName,
   tripDateFrom,
   tripDateTo,
+  tripLodgingType,
+  tripPackageBasePrice,
+  tripReservationMinPerPerson,
   repo,
   users,
   currentUser,
@@ -122,12 +129,34 @@ export const TripMembersTable = ({
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const [blockLocks, setBlockLocks] = useState<Record<string, Record<string, boolean>>>({});
   const [docOwners, setDocOwners] = useState<Record<string, Record<DocumentType, string>>>({});
+  const [docConcepts, setDocConcepts] = useState<
+    Record<string, Record<DocumentType, { concept: string; conceptOther: string }>>
+  >({});
   const [agentTab, setAgentTab] = useState<"active" | "sent">("active");
+  const [expandedCompanionByMember, setExpandedCompanionByMember] = useState<
+    Record<string, number | null>
+  >({});
+  const [expandedInsuranceByMember, setExpandedInsuranceByMember] = useState<
+    Record<string, number | null>
+  >({});
+  const [expandedInsuranceTitularByMember, setExpandedInsuranceTitularByMember] = useState<
+    Record<string, boolean>
+  >({});
+  const [expandedSeatsByMember, setExpandedSeatsByMember] = useState<Record<string, boolean>>({});
+  const [expandedLuggageByMember, setExpandedLuggageByMember] = useState<Record<string, boolean>>({});
+  const [expandedToursByMember, setExpandedToursByMember] = useState<Record<string, boolean>>({});
   const [modRequests, setModRequests] = useState<ContractModificationRequest[]>([]);
   const [modDialog, setModDialog] = useState<{ open: boolean; member: TripMember | null }>({
     open: false,
     member: null,
   });
+  const [modExpandedCompanionIndex, setModExpandedCompanionIndex] = useState<
+    number | null
+  >(0);
+  const [modExpandedInsuranceIndex, setModExpandedInsuranceIndex] = useState<
+    number | null
+  >(0);
+  const [modExpandedInsuranceTitular, setModExpandedInsuranceTitular] = useState(true);
   const [sentSummaryDialog, setSentSummaryDialog] = useState<{
     open: boolean;
     member: TripMember | null;
@@ -187,7 +216,44 @@ export const TripMembersTable = ({
 
   const loadMembers = async () => {
     const data = await repo.listTripMembers(tripId);
-    setMembers(data);
+    const normalized = data.map((member) => ({
+      ...member,
+      companions: (member.companions ?? []).map((companion) => ({
+        ...companion,
+        email: companion.email ?? "",
+        phone: companion.phone ?? "",
+        address: companion.address ?? "",
+        maritalStatus: companion.maritalStatus ?? "",
+        nationalityId: companion.nationalityId ?? "",
+        profession: companion.profession ?? "",
+        wantsInsurance: companion.wantsInsurance ?? null,
+        insuranceId: companion.insuranceId ?? "",
+        hasOwnInsurance: companion.hasOwnInsurance ?? null,
+        emergencyContactName: companion.emergencyContactName ?? "",
+        emergencyContactPhone: companion.emergencyContactPhone ?? "",
+        specialSituations: companion.specialSituations ?? "",
+      })),
+      packageLodgingType: member.packageLodgingType ?? tripLodgingType ?? "",
+      packageBasePrice: member.packageBasePrice ?? tripPackageBasePrice ?? 0,
+      packageFinalPrice:
+        member.packageFinalPrice ??
+        (member.packageBasePrice ?? tripPackageBasePrice ?? 0) * (member.seats || 1),
+      reservationMinPerPerson:
+        member.reservationMinPerPerson ?? tripReservationMinPerPerson ?? 0,
+      reservationFinalPerPerson:
+        member.reservationFinalPerPerson ??
+        member.reservationMinPerPerson ??
+        tripReservationMinPerPerson ??
+        0,
+      paymentPlanMonths: member.paymentPlanMonths ?? null,
+      accommodationType: member.accommodationType ?? "",
+      seatUnitPrice: member.seatUnitPrice ?? null,
+      luggageType: member.luggageType ?? "",
+      luggageQuantity: member.luggageQuantity ?? null,
+      luggageUnitPrice: member.luggageUnitPrice ?? null,
+      extraTours: member.extraTours ?? [],
+    }));
+    setMembers(normalized);
   };
 
   const loadModifications = async () => {
@@ -333,9 +399,69 @@ export const TripMembersTable = ({
     );
   };
 
+  const calculatePackageTotals = (member: TripMember, patch: Partial<TripMember> = {}) => {
+    const next = { ...member, ...patch };
+    const seats = Math.max(1, next.seats || 1);
+    const basePrice = next.packageBasePrice ?? 0;
+    const baseTotal = basePrice * seats;
+    const seatUnitPrice = next.seatUnitPrice ?? 0;
+    const seatTotal = seatUnitPrice * seats;
+    const luggageQty = next.luggageQuantity ?? 0;
+    const luggageUnitPrice = next.luggageUnitPrice ?? 0;
+    const luggageTotal = luggageQty * luggageUnitPrice;
+    const toursTotal = (next.extraTours ?? []).reduce(
+      (sum, tour) => sum + (tour.quantity ?? 0) * (tour.unitPrice ?? 0),
+      0,
+    );
+    const extrasTotal = seatTotal + luggageTotal + toursTotal;
+    const total = baseTotal + extrasTotal;
+    const reservationBase = next.reservationMinPerPerson ?? 0;
+    const reservationPerPerson = reservationBase + (extrasTotal / seats);
+    return {
+      seats,
+      baseTotal,
+      seatTotal,
+      luggageTotal,
+      toursTotal,
+      extrasTotal,
+      total,
+      reservationPerPerson,
+    };
+  };
+
+  const schedulePricingUpdate = (
+    member: TripMember,
+    patch: UpdateTripMemberPatch,
+    key: string,
+  ) => {
+    const totals = calculatePackageTotals(member, patch as Partial<TripMember>);
+    scheduleUpdate(
+      member.id,
+      {
+        ...patch,
+        packageFinalPrice: totals.total,
+        reservationFinalPerPerson: totals.reservationPerPerson,
+      },
+      key,
+    );
+  };
+
+  const updateExtraTours = (member: TripMember, nextTours: TripMember["extraTours"]) => {
+    schedulePricingUpdate(
+      member,
+      {
+        extraTours: nextTours,
+      },
+      `${member.id}:extraTours`,
+    );
+  };
+
   const openModificationDialog = (member: TripMember) => {
     setModDialog({ open: true, member });
     setModStep("STEP1");
+    setModExpandedCompanionIndex(0);
+    setModExpandedInsuranceIndex(0);
+    setModExpandedInsuranceTitular(true);
     setModDraft({
       ...member,
       companions: member.companions.map((companion) => ({ ...companion })),
@@ -417,6 +543,7 @@ export const TripMembersTable = ({
           emergencyContactName: draft.emergencyContactName,
           emergencyContactPhone: draft.emergencyContactPhone,
           specialSituations: draft.specialSituations,
+          companions: draft.companions,
         };
       case "STEP3":
         return {
@@ -440,9 +567,9 @@ export const TripMembersTable = ({
       case "STEP1":
         return "Paso 1 · Datos del viaje";
       case "STEP2":
-        return "Paso 2 · Seguro y emergencia";
+        return "Paso 2 · Acompanantes";
       case "STEP3":
-        return "Paso 3 · Acompanantes";
+        return "Paso 3 · Seguro y emergencia";
       case "STEP4":
         return "Paso 4 · Documentos";
       default:
@@ -455,9 +582,9 @@ export const TripMembersTable = ({
       case "STEP1":
         return "text-emerald-700";
       case "STEP2":
-        return "text-amber-600";
-      case "STEP3":
         return "text-cyan-700";
+      case "STEP3":
+        return "text-amber-600";
       case "STEP4":
         return "text-violet-700";
       default:
@@ -532,8 +659,29 @@ export const TripMembersTable = ({
     return value.trim().length > 0;
   };
 
+  const isInsuranceBlockComplete = (person: {
+    wantsInsurance: boolean | null;
+    insuranceId: string;
+    hasOwnInsurance: boolean | null;
+    emergencyContactName: string;
+    emergencyContactPhone: string;
+    specialSituations: string;
+  }) =>
+    person.wantsInsurance !== null &&
+    (person.wantsInsurance !== true || isFilled(person.insuranceId)) &&
+    (person.wantsInsurance !== false || person.hasOwnInsurance !== null) &&
+    isFilled(person.emergencyContactName) &&
+    isFilled(person.emergencyContactPhone) &&
+    isFilled(person.specialSituations);
+
   const getOwnerValue = (memberId: string, type: DocumentType) =>
     docOwners[memberId]?.[type] ?? "Titular";
+
+  const getConceptValue = (memberId: string, type: DocumentType) =>
+    docConcepts[memberId]?.[type]?.concept ?? "RESERVA";
+
+  const getConceptOtherValue = (memberId: string, type: DocumentType) =>
+    docConcepts[memberId]?.[type]?.conceptOther ?? "";
 
   const getContractsStatusLabel = (member: TripMember) => {
     if (member.contractsStatus !== ContractsStatus.SENT) {
@@ -558,11 +706,58 @@ export const TripMembersTable = ({
     }));
   };
 
+  const setConceptValue = (memberId: string, type: DocumentType, value: string) => {
+    setDocConcepts((prev) => ({
+      ...prev,
+      [memberId]: {
+        ...(prev[memberId] ?? {}),
+        [type]: {
+          concept: value,
+          conceptOther: prev[memberId]?.[type]?.conceptOther ?? "",
+        },
+      },
+    }));
+  };
+
+  const setConceptOtherValue = (memberId: string, type: DocumentType, value: string) => {
+    setDocConcepts((prev) => ({
+      ...prev,
+      [memberId]: {
+        ...(prev[memberId] ?? {}),
+        [type]: {
+          concept: prev[memberId]?.[type]?.concept ?? "RESERVA",
+          conceptOther: value,
+        },
+      },
+    }));
+  };
+
+  const formatDocConcept = (doc: DocumentUpload) => {
+    if (!doc.concept) {
+      return "";
+    }
+    if (doc.concept === "OTHER") {
+      return doc.conceptOther ? `Otros: ${doc.conceptOther}` : "Otros";
+    }
+    return doc.concept;
+  };
+
+  const paymentConceptOptions = [
+    { value: "RESERVA", label: "Reserva" },
+    { value: "ABONO", label: "Abono" },
+    { value: "SEGURO", label: "Seguros" },
+    { value: "ASIENTOS", label: "Asientos adicionales" },
+    { value: "EQUIPAJE", label: "Equipaje" },
+    { value: "TOURS", label: "Tours extra" },
+    { value: "OTHER", label: "Otros" },
+  ];
+
   const addDocuments = (
     member: TripMember,
     type: DocumentType,
     ownerName: string,
     files: FileList | null,
+    meta?: { concept?: string; conceptOther?: string },
   ) => {
     if (!files || files.length === 0) {
       return member.documents;
@@ -573,6 +768,8 @@ export const TripMembersTable = ({
       type,
       fileName: file.name,
       ownerName,
+      concept: meta?.concept ?? "",
+      conceptOther: meta?.conceptOther ?? "",
     }));
     return [...member.documents, ...nextDocs];
   };
@@ -606,31 +803,62 @@ export const TripMembersTable = ({
       { label: "Profesion u ocupacion", ok: isFilled(member.profession) },
     ];
     const step2Checks = [
-      { label: "Desea seguro", ok: member.wantsInsurance !== null },
-      {
-        label: "Tipo de seguro",
-        ok: member.wantsInsurance !== true || isFilled(member.insuranceId),
-      },
-      {
-        label: "Tiene seguro propio",
-        ok: member.wantsInsurance !== false || member.hasOwnInsurance !== null,
-      },
-      { label: "Contacto emergencia", ok: isFilled(member.emergencyContactName) },
-      { label: "Telefono emergencia", ok: isFilled(member.emergencyContactPhone) },
-      { label: "Situaciones especiales", ok: isFilled(member.specialSituations) },
-    ];
-    const step3Checks = [
       { label: "Acompanantes", ok: member.hasCompanions !== null },
       {
         label: "Lista de acompanantes",
         ok: member.hasCompanions !== true || member.companions.length > 0,
       },
       {
+        label: "Datos acompanantes",
+        ok:
+          member.hasCompanions !== true ||
+          member.companions.every(
+            (companion) =>
+              isFilled(companion.fullName) &&
+              isFilled(companion.identification) &&
+              isFilled(companion.email) &&
+              isFilled(companion.phone) &&
+              isFilled(companion.address) &&
+              isFilled(companion.maritalStatus) &&
+              isFilled(companion.nationalityId) &&
+              isFilled(companion.profession),
+          ),
+      },
+      {
         label: "Patria potestad",
         ok: !member.hasMinorCompanions || member.hasParentalAuthority !== null,
       },
     ];
-    const step4Required = [
+    const step3Checks = [
+      { label: "Seguro y emergencia titular", ok: isInsuranceBlockComplete(member) },
+      {
+        label: "Seguro y emergencia acompanantes",
+        ok:
+          member.hasCompanions !== true ||
+          member.companions.every((companion) => isInsuranceBlockComplete(companion)),
+      },
+    ];
+    const step4Checks = [
+      { label: "Acomodacion", ok: isFilled(member.accommodationType) },
+      { label: "Asientos", ok: (member.seats || 0) > 0 },
+      { label: "Precio por asiento", ok: (member.seatUnitPrice ?? 0) >= 0 },
+      {
+        label: "Equipaje",
+        ok:
+          (member.luggageQuantity ?? 0) === 0 ||
+          (isFilled(member.luggageType) && (member.luggageUnitPrice ?? 0) >= 0),
+      },
+      { label: "Precio paquete", ok: (member.packageBasePrice ?? 0) >= 0 },
+      { label: "Reserva minima", ok: (member.reservationMinPerPerson ?? 0) >= 0 },
+      { label: "Plazo cuotas", ok: (member.paymentPlanMonths ?? 0) > 0 },
+      {
+        label: "Tours extras",
+        ok: (member.extraTours ?? []).every(
+          (tour) => isFilled(tour.label) && (tour.quantity ?? 0) > 0 && (tour.unitPrice ?? 0) >= 0,
+        ),
+      },
+    ];
+    const step5Required = [
       { key: "idCard", label: "Documento: Cedula", enabled: true, type: "ID_CARD" as DocumentType },
       { key: "passport", label: "Documento: Pasaporte", enabled: true, type: "PASSPORT" as DocumentType },
       {
@@ -642,11 +870,19 @@ export const TripMembersTable = ({
       {
         key: "insurance",
         label: "Documento: Seguro propio",
-        enabled: member.hasOwnInsurance === true,
+        enabled:
+          member.hasOwnInsurance === true ||
+          member.companions.some((companion) => companion.hasOwnInsurance === true),
         type: "INSURANCE" as DocumentType,
       },
+      {
+        key: "paymentProof",
+        label: "Documento: Pagos",
+        enabled: true,
+        type: "PAYMENT_PROOF" as DocumentType,
+      },
     ];
-    const step4Checks = step4Required
+    const step5Checks = step5Required
       .filter((doc) => doc.enabled)
       .map((doc) => ({
         label: doc.label,
@@ -654,14 +890,6 @@ export const TripMembersTable = ({
           member.docFlags[doc.key as keyof typeof member.docFlags] &&
           getDocsByType(member, doc.type).length > 0,
       }));
-    const step5Checks = [
-      {
-        label: "Comprobante pago inicial",
-        ok:
-          member.docFlags.paymentProof &&
-          getDocsByType(member, "PAYMENT_PROOF").length > 0,
-      },
-    ];
 
     const step1 = buildProgress(step1Checks);
     const step2 = buildProgress(step2Checks);
@@ -767,189 +995,152 @@ export const TripMembersTable = ({
 
       {agentTab === "active" ? (
         <div className="overflow-auto rounded-lg border border-slate-200 bg-white">
-            <table className="min-w-[1200px] w-full border-collapse text-xs">
+          <table className="min-w-[1200px] w-full border-collapse text-xs">
             <thead className="bg-slate-50 text-left text-slate-600">
               <tr>
-                <th className="px-3 py-2">Fecha</th>
-                <th className="px-3 py-2">Agente</th>
-                {isAdmin ? <th className="px-3 py-2">Asignado a</th> : null}
                 <th className="px-3 py-2">Nombre</th>
                 <th className="px-3 py-2">Identificacion</th>
                 <th className="px-3 py-2">Tipo ID</th>
                 <th className="px-3 py-2">Telefono</th>
                 <th className="px-3 py-2">Correo</th>
-                <th className="px-3 py-2">Reservar</th>
-                <th className="px-3 py-2">Detalles</th>
+                <th className="px-3 py-2 text-center">Reserva</th>
+                <th className="px-3 py-2">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {agentActiveMembers.length === 0 ? (
                 <tr className="border-t border-slate-100">
-                  <td
-                    className="px-3 py-6 text-center text-sm text-slate-500"
-                    colSpan={isAdmin ? 10 : 9}
-                  >
+                  <td className="px-3 py-6 text-center text-sm text-slate-500" colSpan={7}>
                     Sin pendientes
                   </td>
                 </tr>
               ) : (
                 agentActiveMembers.map((member) => {
-            const expanded = expandedRows[member.id];
-            const canExpand = member.wantsReservation;
-            const progress = getStepProgress(member);
-            const missingItems = progress.overall.missing;
-            const canSend = progress.overall.percent === 100 && member.contractsStatus !== ContractsStatus.SENT;
-            const step1Locked = isBlockLocked(member.id, "step1");
-            const step2Locked = isBlockLocked(member.id, "step2");
-            const step3Locked = isBlockLocked(member.id, "step3");
-            const step4Locked = isBlockLocked(member.id, "step4");
-            const step5Locked = isBlockLocked(member.id, "step5");
-            const destinationLabel = `${tripName} · ${tripDateFrom} - ${tripDateTo}`;
-            const lockedClass = "pointer-events-none opacity-70";
-            return (
-              <Fragment key={member.id}>
-                <tr className="border-t border-slate-100">
-                  <td className="px-3 py-2 text-slate-600">{formatDate(member.createdAt)}</td>
-                  <td className="px-3 py-2 text-slate-600">
-                    {userById.get(member.enteredByUserId)?.name ?? "-"}
-                  </td>
-                  {isAdmin ? (
-                    <td className="px-3 py-2 text-slate-600">
-                      <select
-                        className={selectClassName}
-                        value={member.assignedToUserId}
-                        onChange={(event) =>
-                          handleSelectChange(member.id, {
-                            assignedToUserId: event.target.value,
-                          })
-                        }
-                      >
-                        {agentUsers.map((user) => (
-                          <option key={user.id} value={user.id}>
-                            {user.name}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  ) : null}
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <input
-                        className={inputClassName}
-                        value={member.fullName}
-                        onChange={(event) =>
-                          scheduleUpdate(
-                            member.id,
-                            { fullName: event.target.value },
-                            `${member.id}:fullName`,
-                          )
-                        }
-                      />
-                      {member.isDraft ? (
-                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-                          Pendiente
-                        </span>
-                      ) : null}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <input
-                      className={inputClassName}
-                      value={member.identification}
-                      onChange={(event) =>
-                        scheduleUpdate(
-                          member.id,
-                          { identification: event.target.value },
-                          `${member.id}:identification`,
-                        )
-                      }
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <select
-                      className={selectClassName}
-                      value={member.identificationTypeId}
-                      onChange={(event) =>
-                        handleSelectChange(
-                          member.id,
-                          { identificationTypeId: event.target.value },
-                          {
-                            catalogName: "identificationTypes",
-                            memberId: member.id,
-                            field: "identificationTypeId",
-                          },
-                        )
-                      }
-                    >
-                      {catalogOptions.identificationTypes.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-3 py-2">
-                    <input
-                      className={inputClassName}
-                      value={member.phone}
-                      onChange={(event) =>
-                        scheduleUpdate(
-                          member.id,
-                          { phone: event.target.value },
-                          `${member.id}:phone`,
-                        )
-                      }
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <input
-                      className={inputClassName}
-                      value={member.email}
-                      onChange={(event) =>
-                        scheduleUpdate(
-                          member.id,
-                          { email: event.target.value },
-                          `${member.id}:email`,
-                        )
-                      }
-                    />
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-slate-300"
-                      checked={member.wantsReservation}
-                      onChange={(event) => {
-                        const nextValue = event.target.checked;
-                        if (!nextValue) {
-                          setExpandedRows((prev) => ({ ...prev, [member.id]: false }));
-                        }
-                        scheduleUpdate(
-                          member.id,
-                          { wantsReservation: nextValue },
-                          `${member.id}:wantsReservation`,
-                        );
-                      }}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    {canExpand ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => toggleExpanded(member.id)}
-                      >
-                        {expanded ? "Ocultar" : "Ver"}
-                      </Button>
-                    ) : (
-                      <span className="text-xs text-slate-400">-</span>
-                    )}
-                  </td>
-                </tr>
-                {expanded && canExpand ? (
-                  <tr className="border-t border-slate-100 bg-slate-50">
-                    <td colSpan={isAdmin ? 10 : 9} className="px-3 py-4">
-                      <div className="space-y-4">
+                  const progress = getStepProgress(member);
+                  const missingItems = progress.overall.missing;
+                  const canSend = missingItems.length === 0;
+                  const expanded = expandedRows[member.id] ?? false;
+                  const canExpand = member.wantsReservation;
+                  const destinationLabel = member.packageName || tripName;
+                  const step1Locked = isBlockLocked(member.id, "step1");
+                  const step2Locked = isBlockLocked(member.id, "step2");
+                  const step3Locked = isBlockLocked(member.id, "step3");
+                  const step4Locked = isBlockLocked(member.id, "step4");
+                  const step5Locked = isBlockLocked(member.id, "step5");
+                  const lockedClass = "pointer-events-none opacity-60";
+                  const pricing = calculatePackageTotals(member);
+                  const hasSeatData = (member.seatUnitPrice ?? 0) > 0;
+                  const hasLuggageData =
+                    (member.luggageQuantity ?? 0) > 0 ||
+                    (member.luggageUnitPrice ?? 0) > 0 ||
+                    Boolean(member.luggageType);
+                  const showSeats = expandedSeatsByMember[member.id] ?? hasSeatData;
+                  const showLuggage = expandedLuggageByMember[member.id] ?? hasLuggageData;
+                  const hasTourData = (member.extraTours ?? []).length > 0;
+                  const showTours = expandedToursByMember[member.id] ?? hasTourData;
+
+                  return (
+                    <Fragment key={member.id}>
+                      <tr className="border-t border-slate-100">
+                        <td className="px-3 py-2 font-medium text-slate-900">{member.fullName}</td>
+                        <td className="px-3 py-2">
+                          <input
+                            className={inputClassName}
+                            value={member.identification}
+                            onChange={(event) =>
+                              scheduleUpdate(
+                                member.id,
+                                { identification: event.target.value },
+                                `${member.id}:identification`,
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <select
+                            className={selectClassName}
+                            value={member.identificationTypeId}
+                            onChange={(event) =>
+                              handleSelectChange(
+                                member.id,
+                                { identificationTypeId: event.target.value },
+                                {
+                                  catalogName: "identificationTypes",
+                                  memberId: member.id,
+                                  field: "identificationTypeId",
+                                },
+                              )
+                            }
+                          >
+                            {catalogOptions.identificationTypes.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            className={inputClassName}
+                            value={member.phone}
+                            onChange={(event) =>
+                              scheduleUpdate(
+                                member.id,
+                                { phone: event.target.value },
+                                `${member.id}:phone`,
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            className={inputClassName}
+                            value={member.email}
+                            onChange={(event) =>
+                              scheduleUpdate(
+                                member.id,
+                                { email: event.target.value },
+                                `${member.id}:email`,
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-slate-300"
+                            checked={member.wantsReservation}
+                            onChange={(event) => {
+                              const nextValue = event.target.checked;
+                              if (!nextValue) {
+                                setExpandedRows((prev) => ({ ...prev, [member.id]: false }));
+                              }
+                              scheduleUpdate(
+                                member.id,
+                                { wantsReservation: nextValue },
+                                `${member.id}:wantsReservation`,
+                              );
+                            }}
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          {canExpand ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => toggleExpanded(member.id)}
+                            >
+                              {expanded ? "Ocultar" : "Ver"}
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-slate-400">-</span>
+                          )}
+                        </td>
+                      </tr>
+                      {expanded && canExpand ? (
+                        <tr className="border-t border-slate-100 bg-slate-50">
+                          <td colSpan={isAdmin ? 10 : 9} className="px-3 py-4">
+                            <div className="space-y-4">
                         <div className="rounded-md border border-slate-200 bg-white p-3">
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
@@ -992,6 +1183,30 @@ export const TripMembersTable = ({
                               <div className="text-xs font-semibold text-slate-600">Destino contratado</div>
                               <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700">
                                 {destinationLabel}
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="text-xs font-semibold text-slate-600">Tipo de hospedaje</div>
+                              <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700">
+                                {member.packageLodgingType === "HOTEL"
+                                  ? "Hotel"
+                                  : member.packageLodgingType === "HOSTEL"
+                                    ? "Hostel"
+                                    : member.packageLodgingType === "AIRBNB"
+                                      ? "Airbnb"
+                                      : "-"}
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="text-xs font-semibold text-slate-600">Precio base paquete</div>
+                              <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700">
+                                USD {(member.packageBasePrice ?? 0).toFixed(2)}
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="text-xs font-semibold text-slate-600">Reserva minima por persona</div>
+                              <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700">
+                                USD {(member.reservationMinPerPerson ?? 0).toFixed(2)}
                               </div>
                             </div>
                             <div className="space-y-1 md:col-span-2">
@@ -1077,7 +1292,7 @@ export const TripMembersTable = ({
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                               <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] text-white">2</span>
-                              <span className="text-amber-600">Paso 2 · Seguro y emergencia</span>
+                              <span className="text-cyan-700">Paso 2 · Acompanantes</span>
                             </div>
                             {step2Locked ? (
                               <Button
@@ -1107,202 +1322,7 @@ export const TripMembersTable = ({
                               style={{ width: `${progress.step2.percent}%` }}
                             />
                           </div>
-                          <div className={`mt-3 grid gap-3 md:grid-cols-3 ${step2Locked ? lockedClass : ""}`}>
-                            <div className="space-y-1">
-                              <div className="text-xs font-semibold text-slate-600">Desea seguro</div>
-                              <select
-                                className={selectClassName}
-                                value={
-                                  member.wantsInsurance === null
-                                    ? ""
-                                    : member.wantsInsurance
-                                      ? "YES"
-                                      : "NO"
-                                }
-                                disabled={step2Locked}
-                                onChange={(event) => {
-                                  const nextValue = event.target.value;
-                                  const wantsInsurance = nextValue === "" ? null : nextValue === "YES";
-                                  const nextDocs = wantsInsurance === false
-                                    ? member.documents
-                                    : member.documents.filter((doc) => doc.type !== "INSURANCE");
-                                  scheduleUpdate(
-                                    member.id,
-                                    {
-                                      wantsInsurance,
-                                      hasOwnInsurance: wantsInsurance === false ? null : null,
-                                      documents: nextDocs,
-                                      docFlags: {
-                                        ...member.docFlags,
-                                        insurance: false,
-                                      },
-                                    },
-                                    `${member.id}:wantsInsurance`,
-                                  );
-                                }}
-                              >
-                                <option value="">Selecciona</option>
-                                <option value="YES">Si</option>
-                                <option value="NO">No</option>
-                              </select>
-                            </div>
-                            {member.wantsInsurance === true ? (
-                              <div className="space-y-1">
-                                <div className="text-xs font-semibold text-slate-600">Tipo de seguro</div>
-                                <select
-                                  className={selectClassName}
-                                  value={member.insuranceId}
-                                  disabled={step2Locked}
-                                  onChange={(event) =>
-                                    handleSelectChange(
-                                      member.id,
-                                      { insuranceId: event.target.value },
-                                      {
-                                        catalogName: "insurances",
-                                        memberId: member.id,
-                                        field: "insuranceId",
-                                      },
-                                    )
-                                  }
-                                >
-                                  <option value="">Selecciona</option>
-                                  {catalogOptions.insurances.map((item) => (
-                                    <option key={item.id} value={item.id}>
-                                      {item.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            ) : null}
-                            {member.wantsInsurance === false ? (
-                              <>
-                                <div className="space-y-1">
-                                  <div className="text-xs font-semibold text-slate-600">Tiene seguro propio</div>
-                                  <select
-                                    className={selectClassName}
-                                    value={
-                                      member.hasOwnInsurance === null
-                                        ? ""
-                                        : member.hasOwnInsurance
-                                          ? "YES"
-                                          : "NO"
-                                    }
-                                    disabled={step2Locked}
-                                    onChange={(event) => {
-                                      const nextValue = event.target.value;
-                                      const hasOwnInsurance = nextValue === "" ? null : nextValue === "YES";
-                                      const nextDocs = hasOwnInsurance
-                                        ? member.documents
-                                        : member.documents.filter((doc) => doc.type !== "INSURANCE");
-                                      scheduleUpdate(
-                                        member.id,
-                                        {
-                                          hasOwnInsurance,
-                                          documents: nextDocs,
-                                          docFlags: {
-                                            ...member.docFlags,
-                                            insurance: hasOwnInsurance ? member.docFlags.insurance : false,
-                                          },
-                                        },
-                                        `${member.id}:hasOwnInsurance`,
-                                      );
-                                    }}
-                                  >
-                                    <option value="">Selecciona</option>
-                                    <option value="YES">Si</option>
-                                    <option value="NO">No</option>
-                                  </select>
-                                </div>
-                                {member.hasOwnInsurance === false ? (
-                                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 md:col-span-2">
-                                    El cliente renuncia al seguro
-                                  </div>
-                                ) : null}
-                              </>
-                            ) : null}
-                            <div className="space-y-1">
-                              <div className="text-xs font-semibold text-slate-600">Contacto de emergencia</div>
-                              <input
-                                className={inputClassName}
-                                value={member.emergencyContactName}
-                                disabled={step2Locked}
-                                onChange={(event) =>
-                                  scheduleUpdate(
-                                    member.id,
-                                    { emergencyContactName: event.target.value },
-                                    `${member.id}:emergencyContactName`,
-                                  )
-                                }
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="text-xs font-semibold text-slate-600">Telefono emergencia</div>
-                              <input
-                                className={inputClassName}
-                                value={member.emergencyContactPhone}
-                                disabled={step2Locked}
-                                onChange={(event) =>
-                                  scheduleUpdate(
-                                    member.id,
-                                    { emergencyContactPhone: event.target.value },
-                                    `${member.id}:emergencyContactPhone`,
-                                  )
-                                }
-                              />
-                            </div>
-                            <div className="space-y-1 md:col-span-3">
-                              <div className="text-xs font-semibold text-slate-600">Situaciones especiales</div>
-                              <textarea
-                                className="min-h-[60px] w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900"
-                                value={member.specialSituations}
-                                disabled={step2Locked}
-                                onChange={(event) =>
-                                  scheduleUpdate(
-                                    member.id,
-                                    { specialSituations: event.target.value },
-                                    `${member.id}:specialSituations`,
-                                  )
-                                }
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="rounded-md border border-slate-200 bg-white p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-                              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] text-white">3</span>
-                              <span className="text-cyan-700">Paso 3 · Acompanantes</span>
-                            </div>
-                            {step3Locked ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setBlockLock(member.id, "step3", false)}
-                              >
-                                Editar
-                              </Button>
-                            ) : (
-                              <Button size="sm" onClick={() => void saveBlock(member.id, "step3")}>
-                                Guardar
-                              </Button>
-                            )}
-                          </div>
-                          <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
-                            <span>Completitud</span>
-                            <span className={progress.step3.percent === 100 ? "text-emerald-600" : ""}>
-                              {progress.step3.percent}%
-                            </span>
-                          </div>
-                          <div className="mt-1 h-1.5 w-full rounded-full bg-slate-100">
-                            <div
-                              className={`h-1.5 rounded-full ${
-                                progress.step3.percent === 100 ? "bg-emerald-500" : "bg-amber-400"
-                              }`}
-                              style={{ width: `${progress.step3.percent}%` }}
-                            />
-                          </div>
-                          <div className={`mt-3 space-y-3 ${step3Locked ? lockedClass : ""}`}>
+                          <div className={`mt-3 space-y-3 ${step2Locked ? lockedClass : ""}`}>
                             <div className="grid gap-3 md:grid-cols-3">
                               <div className="space-y-1">
                                 <div className="text-xs font-semibold text-slate-600">Acompanantes</div>
@@ -1315,7 +1335,7 @@ export const TripMembersTable = ({
                                         ? "true"
                                         : "false"
                                   }
-                                  disabled={step3Locked}
+                                  disabled={step2Locked}
                                   onChange={(event) => {
                                     const hasCompanions = event.target.value === "true";
                                     if (event.target.value === "") {
@@ -1333,6 +1353,10 @@ export const TripMembersTable = ({
                                         },
                                         `${member.id}:hasCompanions`,
                                       );
+                                      setExpandedCompanionByMember((prev) => {
+                                        const { [member.id]: _, ...rest } = prev;
+                                        return rest;
+                                      });
                                       return;
                                     }
                                     if (!hasCompanions) {
@@ -1350,6 +1374,10 @@ export const TripMembersTable = ({
                                         },
                                         `${member.id}:hasCompanions`,
                                       );
+                                      setExpandedCompanionByMember((prev) => {
+                                        const { [member.id]: _, ...rest } = prev;
+                                        return rest;
+                                      });
                                       return;
                                     }
                                     scheduleUpdate(
@@ -1357,6 +1385,10 @@ export const TripMembersTable = ({
                                       { hasCompanions: true },
                                       `${member.id}:hasCompanions`,
                                     );
+                                    setExpandedCompanionByMember((prev) => ({
+                                      ...prev,
+                                      [member.id]: 0,
+                                    }));
                                   }}
                                 >
                                   <option value="">Selecciona</option>
@@ -1368,65 +1400,203 @@ export const TripMembersTable = ({
 
                             {member.hasCompanions ? (
                               <div className="space-y-2">
-                                {member.companions.map((companion, index) => (
-                                  <div key={companion.id} className="grid gap-3 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-4">
-                                    <div className="space-y-1 md:col-span-2">
-                                      <div className="text-xs font-semibold text-slate-600">Nombre completo</div>
-                                      <input
-                                        className={inputClassName}
-                                        value={companion.fullName}
-                                        disabled={step3Locked}
-                                        onChange={(event) => {
-                                          const next = [...member.companions];
-                                          next[index] = { ...companion, fullName: event.target.value };
-                                          updateCompanions(member, next);
-                                        }}
-                                      />
-                                    </div>
-                                    <div className="space-y-1">
-                                      <div className="text-xs font-semibold text-slate-600">Identificacion (si aplica)</div>
-                                      <input
-                                        className={inputClassName}
-                                        value={companion.identification}
-                                        disabled={step3Locked}
-                                        onChange={(event) => {
-                                          const next = [...member.companions];
-                                          next[index] = { ...companion, identification: event.target.value };
-                                          updateCompanions(member, next);
-                                        }}
-                                      />
-                                    </div>
-                                    <div className="flex items-center justify-between gap-2">
-                                      <label className="flex items-center gap-2 text-xs text-slate-600">
-                                        <input
-                                          type="checkbox"
-                                          className="h-4 w-4 rounded border-slate-300"
-                                          checked={companion.isMinor}
-                                          disabled={step3Locked}
-                                          onChange={(event) => {
-                                            const next = [...member.companions];
-                                            next[index] = { ...companion, isMinor: event.target.checked };
-                                            updateCompanions(member, next);
-                                          }}
-                                        />
-                                        Menor de edad
-                                      </label>
-                                      {!step3Locked ? (
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          onClick={() => {
-                                            const next = member.companions.filter((_, i) => i !== index);
-                                            updateCompanions(member, next);
-                                          }}
-                                        >
-                                          Eliminar
-                                        </Button>
+                                {member.companions.map((companion, index) => {
+                                  const companionExpandedIndex =
+                                    expandedCompanionByMember[member.id] === undefined
+                                      ? 0
+                                      : expandedCompanionByMember[member.id];
+                                  const isExpanded = companionExpandedIndex === index;
+                                  return (
+                                    <div
+                                      key={companion.id}
+                                      className="space-y-3 rounded-md border border-slate-200 bg-white p-3"
+                                    >
+                                      <div className="flex items-center justify-between gap-2">
+                                        <div className="text-xs font-semibold text-slate-700">
+                                          <span className="inline-flex items-center rounded-full bg-cyan-100 px-2 py-0.5 text-[11px] font-semibold text-cyan-900">
+                                            Acompanante {index + 1}
+                                          </span>
+                                          {companion.fullName ? ` · ${companion.fullName}` : ""}
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <Button
+                                            size="sm"
+                                            className="h-6 bg-blue-500 px-2 text-[11px] text-white hover:bg-blue-600"
+                                            onClick={() => {
+                                              setExpandedCompanionByMember((prev) => ({
+                                                ...prev,
+                                                [member.id]: isExpanded ? null : index,
+                                              }));
+                                            }}
+                                          >
+                                            {isExpanded ? "Listo" : "Editar"}
+                                          </Button>
+                                          {!step2Locked ? (
+                                            <Button
+                                              size="sm"
+                                              className="h-6 bg-red-500 px-2 text-[11px] text-white hover:bg-red-600"
+                                              onClick={() => {
+                                                const next = member.companions.filter((_, i) => i !== index);
+                                                updateCompanions(member, next);
+                                                setExpandedCompanionByMember((prev) => {
+                                                  const current =
+                                                    prev[member.id] === undefined ? 0 : prev[member.id];
+                                                  if (next.length === 0) {
+                                                    const { [member.id]: _, ...rest } = prev;
+                                                    return rest;
+                                                  }
+                                                  const safeIndex =
+                                                    current === null
+                                                      ? 0
+                                                      : current > index
+                                                        ? current - 1
+                                                        : Math.min(current, next.length - 1);
+                                                  return { ...prev, [member.id]: safeIndex };
+                                                });
+                                              }}
+                                            >
+                                              Eliminar
+                                            </Button>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                      {isExpanded ? (
+                                        <div className="grid gap-3 md:grid-cols-2">
+                                          <div className="space-y-1">
+                                            <div className="text-xs font-semibold text-slate-600">
+                                              Nombre completo
+                                            </div>
+                                            <input
+                                              className={inputClassName}
+                                              value={companion.fullName}
+                                              disabled={step2Locked}
+                                              onChange={(event) => {
+                                                const next = [...member.companions];
+                                                next[index] = { ...companion, fullName: event.target.value };
+                                                updateCompanions(member, next);
+                                              }}
+                                            />
+                                          </div>
+                                          <div className="space-y-1">
+                                            <div className="text-xs font-semibold text-slate-600">Identificacion</div>
+                                            <input
+                                              className={inputClassName}
+                                              value={companion.identification}
+                                              disabled={step2Locked}
+                                              onChange={(event) => {
+                                                const next = [...member.companions];
+                                                next[index] = {
+                                                  ...companion,
+                                                  identification: event.target.value,
+                                                };
+                                                updateCompanions(member, next);
+                                              }}
+                                            />
+                                          </div>
+                                          <div className="space-y-1">
+                                            <div className="text-xs font-semibold text-slate-600">Correo</div>
+                                            <input
+                                              className={inputClassName}
+                                              value={companion.email}
+                                              disabled={step2Locked}
+                                              onChange={(event) => {
+                                                const next = [...member.companions];
+                                                next[index] = { ...companion, email: event.target.value };
+                                                updateCompanions(member, next);
+                                              }}
+                                            />
+                                          </div>
+                                          <div className="space-y-1">
+                                            <div className="text-xs font-semibold text-slate-600">Telefono</div>
+                                            <input
+                                              className={inputClassName}
+                                              value={companion.phone}
+                                              disabled={step2Locked}
+                                              onChange={(event) => {
+                                                const next = [...member.companions];
+                                                next[index] = { ...companion, phone: event.target.value };
+                                                updateCompanions(member, next);
+                                              }}
+                                            />
+                                          </div>
+                                          <div className="space-y-1 md:col-span-2">
+                                            <div className="text-xs font-semibold text-slate-600">Direccion exacta</div>
+                                            <input
+                                              className={inputClassName}
+                                              value={companion.address}
+                                              disabled={step2Locked}
+                                              onChange={(event) => {
+                                                const next = [...member.companions];
+                                                next[index] = { ...companion, address: event.target.value };
+                                                updateCompanions(member, next);
+                                              }}
+                                            />
+                                          </div>
+                                          <div className="space-y-1">
+                                            <div className="text-xs font-semibold text-slate-600">Estado civil</div>
+                                            <select
+                                              className={selectClassName}
+                                              value={companion.maritalStatus}
+                                              disabled={step2Locked}
+                                              onChange={(event) => {
+                                                const next = [...member.companions];
+                                                next[index] = {
+                                                  ...companion,
+                                                  maritalStatus: event.target.value as MaritalStatus | "",
+                                                };
+                                                updateCompanions(member, next);
+                                              }}
+                                            >
+                                              <option value="">Selecciona</option>
+                                              {maritalOptions.map((item) => (
+                                                <option key={item.value} value={item.value}>
+                                                  {item.label}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+                                          <div className="space-y-1">
+                                            <div className="text-xs font-semibold text-slate-600">Nacionalidad</div>
+                                            <select
+                                              className={selectClassName}
+                                              value={companion.nationalityId}
+                                              disabled={step2Locked}
+                                              onChange={(event) => {
+                                                const next = [...member.companions];
+                                                next[index] = { ...companion, nationalityId: event.target.value };
+                                                updateCompanions(member, next);
+                                              }}
+                                            >
+                                              <option value="">Selecciona</option>
+                                              {catalogOptions.nationalities.map((item) => (
+                                                <option key={item.id} value={item.id}>
+                                                  {item.name}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+                                          <div className="space-y-1 md:col-span-2">
+                                            <div className="text-xs font-semibold text-slate-600">
+                                              Profesion u ocupacion
+                                            </div>
+                                            <input
+                                              className={inputClassName}
+                                              value={companion.profession}
+                                              disabled={step2Locked}
+                                              onChange={(event) => {
+                                                const next = [...member.companions];
+                                                next[index] = { ...companion, profession: event.target.value };
+                                                updateCompanions(member, next);
+                                              }}
+                                            />
+                                          </div>
+                                        </div>
                                       ) : null}
+                                      <div className="flex items-center justify-end" />
                                     </div>
-                                  </div>
-                                ))}
-                                {!step3Locked ? (
+                                  );
+                                })}
+                                {!step2Locked ? (
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -1437,14 +1607,92 @@ export const TripMembersTable = ({
                                           id: `${member.id}-companion-${Date.now()}`,
                                           fullName: "",
                                           identification: "",
+                                          email: "",
+                                          phone: "",
+                                          address: "",
+                                          maritalStatus: "" as MaritalStatus | "",
+                                          nationalityId: "",
+                                          profession: "",
                                           isMinor: false,
+                                          wantsInsurance: null,
+                                          insuranceId: "",
+                                          hasOwnInsurance: null,
+                                          emergencyContactName: "",
+                                          emergencyContactPhone: "",
+                                          specialSituations: "",
                                         },
                                       ];
                                       updateCompanions(member, next);
+                                      setExpandedCompanionByMember((prev) => ({
+                                        ...prev,
+                                        [member.id]: next.length - 1,
+                                      }));
                                     }}
                                   >
                                     Agregar acompanante
                                   </Button>
+                                ) : null}
+                              </div>
+                            ) : null}
+
+                            {member.hasCompanions ? (
+                              <div className="space-y-2">
+                                <label className="flex items-center gap-2 text-xs text-slate-600">
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4 rounded border-slate-300"
+                                    checked={member.companions.some((companion) => companion.isMinor)}
+                                    disabled={step2Locked || member.companions.length === 0}
+                                    onChange={(event) => {
+                                      if (member.companions.length === 0) {
+                                        return;
+                                      }
+                                      if (!event.target.checked) {
+                                        const next = member.companions.map((companion) => ({
+                                          ...companion,
+                                          isMinor: false,
+                                        }));
+                                        updateCompanions(member, next);
+                                        return;
+                                      }
+                                      const hasAny = member.companions.some((companion) => companion.isMinor);
+                                      if (hasAny) {
+                                        return;
+                                      }
+                                      const next = member.companions.map((companion, idx) => ({
+                                        ...companion,
+                                        isMinor: idx === 0,
+                                      }));
+                                      updateCompanions(member, next);
+                                    }}
+                                  />
+                                  Hay menores de edad
+                                </label>
+                                {member.companions.some((companion) => companion.isMinor) ? (
+                                  <div className="grid gap-2 md:grid-cols-2">
+                                    {member.companions.map((companion, idx) => (
+                                      <label
+                                        key={companion.id}
+                                        className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          className="h-4 w-4 rounded border-slate-300"
+                                          checked={companion.isMinor}
+                                          disabled={step2Locked}
+                                          onChange={(event) => {
+                                            const next = [...member.companions];
+                                            next[idx] = {
+                                              ...companion,
+                                              isMinor: event.target.checked,
+                                            };
+                                            updateCompanions(member, next);
+                                          }}
+                                        />
+                                        {companion.fullName || `Acompanante ${idx + 1}`}
+                                      </label>
+                                    ))}
+                                  </div>
                                 ) : null}
                               </div>
                             ) : null}
@@ -1462,7 +1710,7 @@ export const TripMembersTable = ({
                                           ? "true"
                                           : "false"
                                     }
-                                    disabled={step3Locked}
+                                    disabled={step2Locked}
                                     onChange={(event) => {
                                       if (event.target.value === "") {
                                         scheduleUpdate(
@@ -1513,8 +1761,424 @@ export const TripMembersTable = ({
                         <div className="rounded-md border border-slate-200 bg-white p-3">
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] text-white">3</span>
+                              <span className="text-amber-600">Paso 3 · Seguro y emergencia</span>
+                            </div>
+                            {step3Locked ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setBlockLock(member.id, "step3", false)}
+                              >
+                                Editar
+                              </Button>
+                            ) : (
+                              <Button size="sm" onClick={() => void saveBlock(member.id, "step3")}>
+                                Guardar
+                              </Button>
+                            )}
+                          </div>
+                          <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                            <span>Completitud</span>
+                            <span className={progress.step3.percent === 100 ? "text-emerald-600" : ""}>
+                              {progress.step3.percent}%
+                            </span>
+                          </div>
+                          <div className="mt-1 h-1.5 w-full rounded-full bg-slate-100">
+                            <div
+                              className={`h-1.5 rounded-full ${
+                                progress.step3.percent === 100 ? "bg-emerald-500" : "bg-amber-400"
+                              }`}
+                              style={{ width: `${progress.step3.percent}%` }}
+                            />
+                          </div>
+                          <div className={`mt-3 space-y-3 ${step3Locked ? lockedClass : ""}`}>
+                            <div className="rounded-md border border-slate-200 bg-white p-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-xs font-semibold text-slate-700">Titular</div>
+                                <Button
+                                  size="sm"
+                                  className="h-6 bg-blue-500 px-2 text-[11px] text-white hover:bg-blue-600"
+                                  onClick={() => {
+                                    setExpandedInsuranceTitularByMember((prev) => ({
+                                      ...prev,
+                                      [member.id]: !((prev[member.id] ?? true) as boolean),
+                                    }));
+                                  }}
+                                >
+                                  {(expandedInsuranceTitularByMember[member.id] ?? true)
+                                    ? "Listo"
+                                    : "Editar"}
+                                </Button>
+                              </div>
+                              {(expandedInsuranceTitularByMember[member.id] ?? true) ? (
+                                <div className="mt-2 grid gap-3 md:grid-cols-3">
+                                <div className="space-y-1">
+                                  <div className="text-xs font-semibold text-slate-600">Desea seguro</div>
+                                  <select
+                                    className={selectClassName}
+                                    value={
+                                      member.wantsInsurance === null
+                                        ? ""
+                                        : member.wantsInsurance
+                                          ? "YES"
+                                          : "NO"
+                                    }
+                                    disabled={step3Locked}
+                                    onChange={(event) => {
+                                      const nextValue = event.target.value;
+                                      const wantsInsurance = nextValue === "" ? null : nextValue === "YES";
+                                      const nextDocs = wantsInsurance === false
+                                        ? member.documents
+                                        : member.documents.filter((doc) => doc.type !== "INSURANCE");
+                                      scheduleUpdate(
+                                        member.id,
+                                        {
+                                          wantsInsurance,
+                                          hasOwnInsurance: wantsInsurance === false ? null : null,
+                                          documents: nextDocs,
+                                          docFlags: {
+                                            ...member.docFlags,
+                                            insurance: false,
+                                          },
+                                        },
+                                        `${member.id}:wantsInsurance`,
+                                      );
+                                    }}
+                                  >
+                                    <option value="">Selecciona</option>
+                                    <option value="YES">Si</option>
+                                    <option value="NO">No</option>
+                                  </select>
+                                </div>
+                                {member.wantsInsurance === true ? (
+                                  <div className="space-y-1">
+                                    <div className="text-xs font-semibold text-slate-600">Tipo de seguro</div>
+                                    <select
+                                      className={selectClassName}
+                                      value={member.insuranceId}
+                                      disabled={step3Locked}
+                                      onChange={(event) =>
+                                        handleSelectChange(
+                                          member.id,
+                                          { insuranceId: event.target.value },
+                                          {
+                                            catalogName: "insurances",
+                                            memberId: member.id,
+                                            field: "insuranceId",
+                                          },
+                                        )
+                                      }
+                                    >
+                                      <option value="">Selecciona</option>
+                                      {catalogOptions.insurances.map((item) => (
+                                        <option key={item.id} value={item.id}>
+                                          {item.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                ) : null}
+                                {member.wantsInsurance === false ? (
+                                  <>
+                                    <div className="space-y-1">
+                                      <div className="text-xs font-semibold text-slate-600">Tiene seguro propio</div>
+                                      <select
+                                        className={selectClassName}
+                                        value={
+                                          member.hasOwnInsurance === null
+                                            ? ""
+                                            : member.hasOwnInsurance
+                                              ? "YES"
+                                              : "NO"
+                                        }
+                                        disabled={step3Locked}
+                                        onChange={(event) => {
+                                          const nextValue = event.target.value;
+                                          const hasOwnInsurance = nextValue === "" ? null : nextValue === "YES";
+                                          const nextDocs = hasOwnInsurance
+                                            ? member.documents
+                                            : member.documents.filter((doc) => doc.type !== "INSURANCE");
+                                          scheduleUpdate(
+                                            member.id,
+                                            {
+                                              hasOwnInsurance,
+                                              documents: nextDocs,
+                                            },
+                                            `${member.id}:hasOwnInsurance`,
+                                          );
+                                        }}
+                                      >
+                                        <option value="">Selecciona</option>
+                                        <option value="YES">Si</option>
+                                        <option value="NO">No</option>
+                                      </select>
+                                    </div>
+                                    {member.hasOwnInsurance === false ? (
+                                      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 md:col-span-2">
+                                        El cliente renuncia al seguro
+                                      </div>
+                                    ) : null}
+                                  </>
+                                ) : null}
+                                <div className="space-y-1">
+                                  <div className="text-xs font-semibold text-slate-600">Contacto de emergencia</div>
+                                  <input
+                                    className={inputClassName}
+                                    value={member.emergencyContactName}
+                                    disabled={step3Locked}
+                                    onChange={(event) =>
+                                      scheduleUpdate(
+                                        member.id,
+                                        { emergencyContactName: event.target.value },
+                                        `${member.id}:emergencyContactName`,
+                                      )
+                                    }
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <div className="text-xs font-semibold text-slate-600">Telefono emergencia</div>
+                                  <input
+                                    className={inputClassName}
+                                    value={member.emergencyContactPhone}
+                                    disabled={step3Locked}
+                                    onChange={(event) =>
+                                      scheduleUpdate(
+                                        member.id,
+                                        { emergencyContactPhone: event.target.value },
+                                        `${member.id}:emergencyContactPhone`,
+                                      )
+                                    }
+                                  />
+                                </div>
+                                <div className="space-y-1 md:col-span-3">
+                                  <div className="text-xs font-semibold text-slate-600">Situaciones especiales</div>
+                                  <textarea
+                                    className="min-h-[60px] w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900"
+                                    value={member.specialSituations}
+                                    disabled={step3Locked}
+                                    onChange={(event) =>
+                                      scheduleUpdate(
+                                        member.id,
+                                        { specialSituations: event.target.value },
+                                        `${member.id}:specialSituations`,
+                                      )
+                                    }
+                                  />
+                                </div>
+                              </div>
+                              ) : null}
+                            </div>
+
+                            {member.companions.map((companion, index) => {
+                              const expandedIndex =
+                                expandedInsuranceByMember[member.id] === undefined
+                                  ? 0
+                                  : expandedInsuranceByMember[member.id];
+                              const isExpanded = expandedIndex === index;
+                              return (
+                                <div key={companion.id} className="rounded-md border border-slate-200 bg-white p-3">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="text-xs font-semibold text-slate-700">
+                                      Acompanante {index + 1}
+                                      {companion.fullName ? ` · ${companion.fullName}` : ""}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <Button
+                                        size="sm"
+                                        className="h-6 bg-blue-500 px-2 text-[11px] text-white hover:bg-blue-600"
+                                        onClick={() => {
+                                          setExpandedInsuranceByMember((prev) => ({
+                                            ...prev,
+                                            [member.id]: isExpanded ? null : index,
+                                          }));
+                                        }}
+                                      >
+                                        {isExpanded ? "Listo" : "Editar"}
+                                      </Button>
+                                      {!step3Locked ? (
+                                        <Button
+                                          size="sm"
+                                          className="h-6 bg-red-500 px-2 text-[11px] text-white hover:bg-red-600"
+                                          onClick={() => {
+                                            const next = member.companions.filter((_, i) => i !== index);
+                                            updateCompanions(member, next);
+                                            setExpandedInsuranceByMember((prev) => {
+                                              const current =
+                                                prev[member.id] === undefined ? 0 : prev[member.id];
+                                              if (next.length === 0) {
+                                                const { [member.id]: _, ...rest } = prev;
+                                                return rest;
+                                              }
+                                              const safeIndex =
+                                                current === null
+                                                  ? 0
+                                                  : current > index
+                                                    ? current - 1
+                                                    : Math.min(current, next.length - 1);
+                                              return { ...prev, [member.id]: safeIndex };
+                                            });
+                                          }}
+                                        >
+                                          Eliminar
+                                        </Button>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  {isExpanded ? (
+                                    <div className="mt-2 grid gap-3 md:grid-cols-3">
+                                      <div className="space-y-1">
+                                        <div className="text-xs font-semibold text-slate-600">Desea seguro</div>
+                                        <select
+                                          className={selectClassName}
+                                          value={
+                                            companion.wantsInsurance === null
+                                              ? ""
+                                              : companion.wantsInsurance
+                                                ? "YES"
+                                                : "NO"
+                                          }
+                                          disabled={step3Locked}
+                                          onChange={(event) => {
+                                            const nextValue = event.target.value;
+                                            const wantsInsurance = nextValue === "" ? null : nextValue === "YES";
+                                            const next = [...member.companions];
+                                            next[index] = {
+                                              ...companion,
+                                              wantsInsurance,
+                                              hasOwnInsurance: wantsInsurance === false ? null : null,
+                                            };
+                                            updateCompanions(member, next);
+                                          }}
+                                        >
+                                          <option value="">Selecciona</option>
+                                          <option value="YES">Si</option>
+                                          <option value="NO">No</option>
+                                        </select>
+                                      </div>
+                                      {companion.wantsInsurance === true ? (
+                                        <div className="space-y-1">
+                                          <div className="text-xs font-semibold text-slate-600">Tipo de seguro</div>
+                                          <select
+                                            className={selectClassName}
+                                            value={companion.insuranceId}
+                                            disabled={step3Locked}
+                                            onChange={(event) => {
+                                              const next = [...member.companions];
+                                              next[index] = {
+                                                ...companion,
+                                                insuranceId: event.target.value,
+                                              };
+                                              updateCompanions(member, next);
+                                            }}
+                                          >
+                                            <option value="">Selecciona</option>
+                                            {catalogOptions.insurances.map((item) => (
+                                              <option key={item.id} value={item.id}>
+                                                {item.name}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                      ) : null}
+                                      {companion.wantsInsurance === false ? (
+                                        <>
+                                          <div className="space-y-1">
+                                            <div className="text-xs font-semibold text-slate-600">Tiene seguro propio</div>
+                                            <select
+                                              className={selectClassName}
+                                              value={
+                                                companion.hasOwnInsurance === null
+                                                  ? ""
+                                                  : companion.hasOwnInsurance
+                                                    ? "YES"
+                                                    : "NO"
+                                              }
+                                              disabled={step3Locked}
+                                              onChange={(event) => {
+                                                const nextValue = event.target.value;
+                                                const hasOwnInsurance = nextValue === "" ? null : nextValue === "YES";
+                                                const next = [...member.companions];
+                                                next[index] = {
+                                                  ...companion,
+                                                  hasOwnInsurance,
+                                                };
+                                                updateCompanions(member, next);
+                                              }}
+                                            >
+                                              <option value="">Selecciona</option>
+                                              <option value="YES">Si</option>
+                                              <option value="NO">No</option>
+                                            </select>
+                                          </div>
+                                          {companion.hasOwnInsurance === false ? (
+                                            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 md:col-span-2">
+                                              El cliente renuncia al seguro
+                                            </div>
+                                          ) : null}
+                                        </>
+                                      ) : null}
+                                      <div className="space-y-1">
+                                        <div className="text-xs font-semibold text-slate-600">Contacto de emergencia</div>
+                                        <input
+                                          className={inputClassName}
+                                          value={companion.emergencyContactName}
+                                          disabled={step3Locked}
+                                          onChange={(event) => {
+                                            const next = [...member.companions];
+                                            next[index] = {
+                                              ...companion,
+                                              emergencyContactName: event.target.value,
+                                            };
+                                            updateCompanions(member, next);
+                                          }}
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <div className="text-xs font-semibold text-slate-600">Telefono emergencia</div>
+                                        <input
+                                          className={inputClassName}
+                                          value={companion.emergencyContactPhone}
+                                          disabled={step3Locked}
+                                          onChange={(event) => {
+                                            const next = [...member.companions];
+                                            next[index] = {
+                                              ...companion,
+                                              emergencyContactPhone: event.target.value,
+                                            };
+                                            updateCompanions(member, next);
+                                          }}
+                                        />
+                                      </div>
+                                      <div className="space-y-1 md:col-span-3">
+                                        <div className="text-xs font-semibold text-slate-600">Situaciones especiales</div>
+                                        <textarea
+                                          className="min-h-[60px] w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900"
+                                          value={companion.specialSituations}
+                                          disabled={step3Locked}
+                                          onChange={(event) => {
+                                            const next = [...member.companions];
+                                            next[index] = {
+                                              ...companion,
+                                              specialSituations: event.target.value,
+                                            };
+                                            updateCompanions(member, next);
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="rounded-md border border-slate-200 bg-white p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                               <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] text-white">4</span>
-                              <span className="text-violet-700">Paso 4 · Documentos</span>
+                              <span className="text-sky-700">Paso 4 · Adicionales</span>
                             </div>
                             {step4Locked ? (
                               <Button
@@ -1544,147 +2208,474 @@ export const TripMembersTable = ({
                               style={{ width: `${progress.step4.percent}%` }}
                             />
                           </div>
-                          <div className={`mt-3 space-y-3 ${step4Locked ? lockedClass : ""}`}>
-                            <div className="flex flex-wrap gap-4 text-xs text-slate-600">
-                              {(
-                                [
-                                  { key: "idCard", label: "Cedula", type: "ID_CARD" as DocumentType, enabled: true },
-                                  { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType, enabled: true },
-                                  {
-                                    key: "minorPermit",
-                                    label: "Permiso menor",
-                                    type: "MINOR_PERMIT" as DocumentType,
-                                    enabled: member.hasMinorCompanions && member.hasParentalAuthority === false,
-                                  },
-                                  {
-                                    key: "insurance",
-                                    label: "Seguro propio",
-                                    type: "INSURANCE" as DocumentType,
-                                    enabled: member.hasOwnInsurance === true,
-                                  },
-                                ]
-                              ).map((item) => (
-                                <label key={item.key} className="flex items-center gap-2">
-                                  <input
-                                    type="checkbox"
-                                    className="h-4 w-4 rounded border-slate-300"
-                                    checked={member.docFlags[item.key as keyof typeof member.docFlags]}
-                                    disabled={step4Locked || !item.enabled}
-                                    onChange={(event) => {
-                                      const checked = event.target.checked;
-                                      const nextDocs = checked
-                                        ? member.documents
-                                        : member.documents.filter((doc) => doc.type !== item.type);
-                                      scheduleUpdate(
-                                        member.id,
-                                        {
-                                          docFlags: {
-                                            ...member.docFlags,
-                                            [item.key]: checked,
-                                          },
-                                          documents: nextDocs,
-                                        },
-                                        `${member.id}:docFlags:${item.key}`,
-                                      );
-                                    }}
-                                  />
-                                  <span className={!item.enabled ? "text-slate-300" : ""}>{item.label}</span>
-                                </label>
-                              ))}
+                          <div className={`mt-3 space-y-4 ${step4Locked ? lockedClass : ""}`}>
+                            <div className="grid gap-3 md:grid-cols-3">
+                              <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-600">Acomodacion</div>
+                                <select
+                                  className={selectClassName}
+                                  value={member.accommodationType}
+                                  disabled={step4Locked}
+                                  onChange={(event) =>
+                                    scheduleUpdate(
+                                      member.id,
+                                      { accommodationType: event.target.value as TripMember["accommodationType"] },
+                                      `${member.id}:accommodationType`,
+                                    )
+                                  }
+                                >
+                                  <option value="">Selecciona</option>
+                                  <option value="TWIN">Twin</option>
+                                  <option value="INDIVIDUAL">Individual</option>
+                                  <option value="MATRIMONIAL">Matrimonial</option>
+                                  <option value="TRIPLE">Triple</option>
+                                  <option value="CUADRUPLE">Cuadruple</option>
+                                </select>
+                              </div>
                             </div>
 
-                            {(
-                              [
-                                { key: "idCard", label: "Cedula", type: "ID_CARD" as DocumentType },
-                                { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType },
-                                { key: "minorPermit", label: "Permiso menor", type: "MINOR_PERMIT" as DocumentType },
-                                { key: "insurance", label: "Seguro propio", type: "INSURANCE" as DocumentType },
-                              ]
-                            ).map((item) => {
-                              const enabled = member.docFlags[item.key as keyof typeof member.docFlags];
-                              if (!enabled) {
-                                return null;
-                              }
-                              const ownerOptions = [
-                                "Titular",
-                                ...member.companions
-                                  .map((companion) => companion.fullName)
-                                  .filter((name) => name.trim().length > 0),
-                              ];
-                              const docs = getDocsByType(member, item.type);
-                              return (
-                                <div key={item.key} className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                                  <div className="text-xs font-semibold text-slate-700">{item.label}</div>
-                                  <div className="mt-2 grid gap-2 md:grid-cols-3">
-                                    <div className="space-y-1">
-                                      <div className="text-[11px] text-slate-500">Pertenece a</div>
-                                      <select
-                                        className={selectClassName}
-                                        value={getOwnerValue(member.id, item.type)}
-                                        disabled={step4Locked}
-                                        onChange={(event) =>
-                                          setOwnerValue(member.id, item.type, event.target.value)
-                                        }
-                                      >
-                                        {ownerOptions.map((option) => (
-                                          <option key={option} value={option}>
-                                            {option}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1 md:col-span-2">
-                                      <div className="text-[11px] text-slate-500">Adjuntar documentos</div>
+                            <div className="rounded-md border border-slate-200 bg-white p-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-xs font-semibold text-slate-600">Asientos</div>
+                                {showSeats ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setExpandedSeatsByMember((prev) => ({
+                                        ...prev,
+                                        [member.id]: false,
+                                      }));
+                                      schedulePricingUpdate(
+                                        member,
+                                        { seatUnitPrice: null },
+                                        `${member.id}:seats:clear`,
+                                      );
+                                    }}
+                                  >
+                                    Quitar asientos
+                                  </Button>
+                                ) : !step4Locked ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setExpandedSeatsByMember((prev) => ({
+                                        ...prev,
+                                        [member.id]: true,
+                                      }));
+                                      if ((member.seatUnitPrice ?? 0) === 0) {
+                                        schedulePricingUpdate(
+                                          member,
+                                          { seatUnitPrice: null },
+                                          `${member.id}:seats:init`,
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    Agregar asientos
+                                  </Button>
+                                ) : null}
+                              </div>
+                              {showSeats ? (
+                                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                                  <div className="space-y-1">
+                                    <div className="text-xs font-semibold text-slate-600">Cantidad de asientos</div>
+                                    <input
+                                      className={inputClassName}
+                                      type="number"
+                                      min={1}
+                                      value={member.seats}
+                                      disabled={step4Locked}
+                                      onChange={(event) =>
+                                        schedulePricingUpdate(
+                                          member,
+                                          { seats: Number(event.target.value || 1) },
+                                          `${member.id}:seats`,
+                                        )
+                                      }
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <div className="text-xs font-semibold text-slate-600">Precio por asiento</div>
+                                    <input
+                                      className={inputClassName}
+                                      type="number"
+                                      min={0}
+                                      step="0.01"
+                                      value={
+                                        member.seatUnitPrice === 0
+                                          ? ""
+                                          : member.seatUnitPrice ?? ""
+                                      }
+                                      disabled={step4Locked}
+                                      onChange={(event) =>
+                                        schedulePricingUpdate(
+                                          member,
+                                          {
+                                            seatUnitPrice:
+                                              event.target.value === "" ? null : Number(event.target.value),
+                                          },
+                                          `${member.id}:seatUnitPrice`,
+                                        )
+                                      }
+                                    />
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <div className="rounded-md border border-slate-200 bg-white p-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-xs font-semibold text-slate-600">Equipaje</div>
+                                {showLuggage ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setExpandedLuggageByMember((prev) => ({
+                                        ...prev,
+                                        [member.id]: false,
+                                      }));
+                                      schedulePricingUpdate(
+                                        member,
+                                        {
+                                          luggageType: "",
+                                          luggageQuantity: null,
+                                          luggageUnitPrice: null,
+                                        },
+                                        `${member.id}:luggage:clear`,
+                                      );
+                                    }}
+                                  >
+                                    Quitar equipaje
+                                  </Button>
+                                ) : !step4Locked ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setExpandedLuggageByMember((prev) => ({
+                                        ...prev,
+                                        [member.id]: true,
+                                      }));
+                                      if (
+                                        (member.luggageQuantity ?? 0) === 0 &&
+                                        (member.luggageUnitPrice ?? 0) === 0 &&
+                                        !member.luggageType
+                                      ) {
+                                        schedulePricingUpdate(
+                                          member,
+                                          {
+                                            luggageType: "",
+                                            luggageQuantity: null,
+                                            luggageUnitPrice: null,
+                                          },
+                                          `${member.id}:luggage:init`,
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    Agregar equipaje
+                                  </Button>
+                                ) : null}
+                              </div>
+                              {showLuggage ? (
+                                <div className="mt-3 grid gap-3 md:grid-cols-3">
+                                  <div className="space-y-1">
+                                    <div className="text-xs font-semibold text-slate-600">Tipo de equipaje</div>
+                                    <select
+                                      className={selectClassName}
+                                      value={member.luggageType}
+                                      disabled={step4Locked}
+                                      onChange={(event) =>
+                                        scheduleUpdate(
+                                          member.id,
+                                          { luggageType: event.target.value as TripMember["luggageType"] },
+                                          `${member.id}:luggageType`,
+                                        )
+                                      }
+                                    >
+                                      <option value="">Sin seleccionar</option>
+                                      <option value="CARRY_ON">Carrion</option>
+                                      <option value="CHECKED">Documentado</option>
+                                    </select>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <div className="text-xs font-semibold text-slate-600">Cantidad</div>
+                                    <input
+                                      className={inputClassName}
+                                      type="number"
+                                      min={0}
+                                      value={
+                                        member.luggageQuantity === 0
+                                          ? ""
+                                          : member.luggageQuantity ?? ""
+                                      }
+                                      disabled={step4Locked}
+                                      onChange={(event) =>
+                                        schedulePricingUpdate(
+                                          member,
+                                          {
+                                            luggageQuantity:
+                                              event.target.value === "" ? null : Number(event.target.value),
+                                          },
+                                          `${member.id}:luggageQuantity`,
+                                        )
+                                      }
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <div className="text-xs font-semibold text-slate-600">Precio unitario</div>
+                                    <input
+                                      className={inputClassName}
+                                      type="number"
+                                      min={0}
+                                      step="0.01"
+                                      value={
+                                        member.luggageUnitPrice === 0
+                                          ? ""
+                                          : member.luggageUnitPrice ?? ""
+                                      }
+                                      disabled={step4Locked}
+                                      onChange={(event) =>
+                                        schedulePricingUpdate(
+                                          member,
+                                          {
+                                            luggageUnitPrice:
+                                              event.target.value === "" ? null : Number(event.target.value),
+                                          },
+                                          `${member.id}:luggageUnitPrice`,
+                                        )
+                                      }
+                                    />
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <div className="rounded-md border border-slate-200 bg-white p-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-xs font-semibold text-slate-600">Tours extra</div>
+                                {showTours ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setExpandedToursByMember((prev) => ({
+                                        ...prev,
+                                        [member.id]: false,
+                                      }));
+                                      updateExtraTours(member, []);
+                                    }}
+                                  >
+                                    Quitar tours
+                                  </Button>
+                                ) : !step4Locked ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setExpandedToursByMember((prev) => ({
+                                        ...prev,
+                                        [member.id]: true,
+                                      }));
+                                      if ((member.extraTours ?? []).length === 0) {
+                                        updateExtraTours(member, []);
+                                      }
+                                    }}
+                                  >
+                                    Agregar tours
+                                  </Button>
+                                ) : null}
+                              </div>
+                              {showTours ? (
+                                <div className="mt-3 space-y-2">
+                                  <div className="grid gap-2 text-[11px] text-slate-500 md:grid-cols-[2fr_1fr_1fr_auto]">
+                                    <div>Detalle del tour</div>
+                                    <div>Cantidad</div>
+                                    <div>Precio unitario</div>
+                                    <div />
+                                  </div>
+                                  {(member.extraTours ?? []).map((tour, index) => (
+                                    <div
+                                      key={tour.id}
+                                      className="grid gap-2 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-[2fr_1fr_1fr_auto]"
+                                    >
                                       <input
                                         className={inputClassName}
-                                        type="file"
-                                        multiple
+                                        placeholder="Detalle del tour"
+                                        value={tour.label}
                                         disabled={step4Locked}
                                         onChange={(event) => {
-                                          const nextDocs = addDocuments(
-                                            member,
-                                            item.type,
-                                            getOwnerValue(member.id, item.type),
-                                            event.target.files,
-                                          );
-                                          if (nextDocs.length !== member.documents.length) {
-                                            scheduleUpdate(
-                                              member.id,
-                                              { documents: nextDocs },
-                                              `${member.id}:documents:${item.key}`,
-                                            );
-                                          }
+                                          const next = [...(member.extraTours ?? [])];
+                                          next[index] = { ...tour, label: event.target.value };
+                                          updateExtraTours(member, next);
                                         }}
                                       />
+                                      <input
+                                        className={inputClassName}
+                                        type="number"
+                                        min={1}
+                                        placeholder="Cantidad"
+                                        value={tour.quantity === 0 ? "" : tour.quantity ?? ""}
+                                        disabled={step4Locked}
+                                        onChange={(event) => {
+                                          const next = [...(member.extraTours ?? [])];
+                                          next[index] = {
+                                            ...tour,
+                                            quantity:
+                                              event.target.value === "" ? null : Number(event.target.value),
+                                          };
+                                          updateExtraTours(member, next);
+                                        }}
+                                      />
+                                      <input
+                                        className={inputClassName}
+                                        type="number"
+                                        min={0}
+                                        step="0.01"
+                                        placeholder="Precio"
+                                        value={tour.unitPrice === 0 ? "" : tour.unitPrice ?? ""}
+                                        disabled={step4Locked}
+                                        onChange={(event) => {
+                                          const next = [...(member.extraTours ?? [])];
+                                          next[index] = {
+                                            ...tour,
+                                            unitPrice:
+                                              event.target.value === "" ? null : Number(event.target.value),
+                                          };
+                                          updateExtraTours(member, next);
+                                        }}
+                                      />
+                                      {!step4Locked ? (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => {
+                                            const next = (member.extraTours ?? []).filter((_, i) => i !== index);
+                                            updateExtraTours(member, next);
+                                          }}
+                                        >
+                                          Quitar
+                                        </Button>
+                                      ) : null}
                                     </div>
-                                  </div>
-                                  {docs.length > 0 ? (
-                                    <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-600">
-                                      {docs.map((doc) => (
-                                        <span key={doc.id} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-0.5">
-                                          {doc.fileName} · {doc.ownerName}
-                                          {!step4Locked ? (
-                                            <button
-                                              type="button"
-                                              className="text-slate-500 hover:text-slate-900"
-                                              onClick={() =>
-                                                scheduleUpdate(
-                                                  member.id,
-                                                  { documents: removeDocument(member, doc.id) },
-                                                  `${member.id}:documents:remove:${doc.id}`,
-                                                )
-                                              }
-                                            >
-                                              x
-                                            </button>
-                                          ) : null}
-                                        </span>
-                                      ))}
-                                    </div>
+                                  ))}
+                                  {!step4Locked ? (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() =>
+                                        updateExtraTours(member, [
+                                          ...(member.extraTours ?? []),
+                                          {
+                                            id: `${member.id}-tour-${Date.now()}`,
+                                            label: "",
+                                            quantity: null,
+                                            unitPrice: null,
+                                          },
+                                        ])
+                                      }
+                                    >
+                                      Agregar tour
+                                    </Button>
                                   ) : null}
                                 </div>
-                              );
-                            })}
+                              ) : null}
+                            </div>
+
+                            <div className="grid gap-3 md:grid-cols-3">
+                              <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-600">Precio paquete base (USD)</div>
+                                <input
+                                  className={inputClassName}
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={member.packageBasePrice === 0 ? "" : member.packageBasePrice ?? ""}
+                                  disabled={step4Locked}
+                                  onChange={(event) =>
+                                    schedulePricingUpdate(
+                                      member,
+                                      {
+                                        packageBasePrice:
+                                          event.target.value === "" ? null : Number(event.target.value),
+                                      },
+                                      `${member.id}:packageBasePrice`,
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-600">Reserva minima por persona</div>
+                                <input
+                                  className={inputClassName}
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={
+                                    member.reservationMinPerPerson === 0
+                                      ? ""
+                                      : member.reservationMinPerPerson ?? ""
+                                  }
+                                  disabled={step4Locked}
+                                  onChange={(event) =>
+                                    schedulePricingUpdate(
+                                      member,
+                                      {
+                                        reservationMinPerPerson:
+                                          event.target.value === "" ? null : Number(event.target.value),
+                                      },
+                                      `${member.id}:reservationMinPerPerson`,
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-600">Plazo para cuotas (meses)</div>
+                                <input
+                                  className={inputClassName}
+                                  type="number"
+                                  min={1}
+                                  value={member.paymentPlanMonths === 0 ? "" : member.paymentPlanMonths ?? ""}
+                                  disabled={step4Locked}
+                                  onChange={(event) =>
+                                    scheduleUpdate(
+                                      member.id,
+                                      {
+                                        paymentPlanMonths:
+                                          event.target.value === "" ? null : Number(event.target.value),
+                                      },
+                                      `${member.id}:paymentPlanMonths`,
+                                    )
+                                  }
+                                />
+                              </div>
+                            </div>
+
+                            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                              <div className="grid gap-2 md:grid-cols-3">
+                                <div>
+                                  <div className="text-[11px]">Total paquete</div>
+                                  <div className="text-sm font-semibold text-slate-900">
+                                    USD {pricing.total.toFixed(2)}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px]">Reserva por persona</div>
+                                  <div className="text-sm font-semibold text-slate-900">
+                                    USD {pricing.reservationPerPerson.toFixed(2)}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px]">Reserva total</div>
+                                  <div className="text-sm font-semibold text-slate-900">
+                                    USD {(pricing.reservationPerPerson * pricing.seats).toFixed(2)}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         </div>
 
@@ -1692,7 +2683,7 @@ export const TripMembersTable = ({
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                               <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] text-white">5</span>
-                              <span className="text-emerald-700">Paso 5 · Pago inicial</span>
+                              <span className="text-violet-700">Paso 5 · Documentos</span>
                             </div>
                             {step5Locked ? (
                               <Button
@@ -1723,78 +2714,205 @@ export const TripMembersTable = ({
                             />
                           </div>
                           <div className={`mt-3 space-y-3 ${step5Locked ? lockedClass : ""}`}>
-                            <div className="space-y-1">
-                              <div className="text-xs font-semibold text-slate-600">
-                                Comprobante de pago inicial
-                              </div>
-                              <input
-                                className={inputClassName}
-                                type="file"
-                                multiple
-                                disabled={step5Locked}
-                                onChange={(event) => {
-                                  const nextDocs = addDocuments(
-                                    member,
-                                    "PAYMENT_PROOF",
-                                    "Pago inicial",
-                                    event.target.files,
-                                  );
-                                  const hasPaymentProof = nextDocs.some(
-                                    (doc) => doc.type === "PAYMENT_PROOF",
-                                  );
-                                  if (nextDocs.length !== member.documents.length) {
-                                    scheduleUpdate(
-                                      member.id,
-                                      {
-                                        documents: nextDocs,
-                                        docFlags: {
-                                          ...member.docFlags,
-                                          paymentProof: hasPaymentProof,
+                            <div className="flex flex-wrap gap-4 text-xs text-slate-600">
+                              {(
+                                [
+                                  { key: "idCard", label: "Cedula", type: "ID_CARD" as DocumentType, enabled: true },
+                                  { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType, enabled: true },
+                                  {
+                                    key: "minorPermit",
+                                    label: "Permiso menor",
+                                    type: "MINOR_PERMIT" as DocumentType,
+                                    enabled: member.hasMinorCompanions && member.hasParentalAuthority === false,
+                                  },
+                                  {
+                                    key: "insurance",
+                                    label: "Seguro propio",
+                                    type: "INSURANCE" as DocumentType,
+                                    enabled:
+                                      member.hasOwnInsurance === true ||
+                                      member.companions.some((companion) => companion.hasOwnInsurance === true),
+                                  },
+                                  {
+                                    key: "paymentProof",
+                                    label: "Pagos",
+                                    type: "PAYMENT_PROOF" as DocumentType,
+                                    enabled: true,
+                                  },
+                                ]
+                              ).map((item) => (
+                                <label key={item.key} className="flex items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4 rounded border-slate-300"
+                                    checked={member.docFlags[item.key as keyof typeof member.docFlags]}
+                                    disabled={step5Locked || !item.enabled}
+                                    onChange={(event) => {
+                                      const checked = event.target.checked;
+                                      const nextDocs = checked
+                                        ? member.documents
+                                        : member.documents.filter((doc) => doc.type !== item.type);
+                                      scheduleUpdate(
+                                        member.id,
+                                        {
+                                          docFlags: {
+                                            ...member.docFlags,
+                                            [item.key]: checked,
+                                          },
+                                          documents: nextDocs,
                                         },
-                                      },
-                                      `${member.id}:documents:paymentProof`,
-                                    );
-                                  }
-                                }}
-                              />
-                            </div>
-                            {getDocsByType(member, "PAYMENT_PROOF").length > 0 ? (
-                              <div className="flex flex-wrap gap-2 text-[11px] text-slate-600">
-                                {getDocsByType(member, "PAYMENT_PROOF").map((doc) => (
+                                        `${member.id}:docFlags:${item.key}`,
+                                      );
+                                    }}
+                                  />
                                   <span
-                                    key={doc.id}
-                                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-0.5"
+                                    className={
+                                      !item.enabled
+                                        ? "text-slate-300"
+                                        : getDocsByType(member, item.type).length > 0
+                                          ? "rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700"
+                                          : "rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-rose-700"
+                                    }
                                   >
-                                    {doc.fileName}
-                                    {!step5Locked ? (
-                                      <button
-                                        type="button"
-                                        className="text-slate-500 hover:text-slate-900"
-                                        onClick={() => {
-                                          const nextDocs = removeDocument(member, doc.id);
-                                          const hasPaymentProof = nextDocs.some(
-                                            (entry) => entry.type === "PAYMENT_PROOF",
-                                          );
-                                          scheduleUpdate(
-                                            member.id,
-                                            {
-                                              documents: nextDocs,
-                                              docFlags: {
-                                                ...member.docFlags,
-                                                paymentProof: hasPaymentProof,
-                                              },
-                                            },
-                                            `${member.id}:documents:remove:${doc.id}`,
-                                          );
-                                        }}
-                                      >
-                                        x
-                                      </button>
-                                    ) : null}
+                                    {item.label}
                                   </span>
-                                ))}
-                              </div>
-                            ) : null}
+                                </label>
+                              ))}
+                            </div>
+
+                            {(
+                              [
+                                { key: "idCard", label: "Cedula", type: "ID_CARD" as DocumentType },
+                                { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType },
+                                { key: "minorPermit", label: "Permiso menor", type: "MINOR_PERMIT" as DocumentType },
+                                { key: "insurance", label: "Seguro propio", type: "INSURANCE" as DocumentType },
+                                { key: "paymentProof", label: "Pagos", type: "PAYMENT_PROOF" as DocumentType },
+                              ]
+                            ).map((item) => {
+                              const enabled = member.docFlags[item.key as keyof typeof member.docFlags];
+                              if (!enabled) {
+                                return null;
+                              }
+                              const ownerOptions = [
+                                "Titular",
+                                ...member.companions
+                                  .map((companion) => companion.fullName)
+                                  .filter((name) => name.trim().length > 0),
+                              ];
+                              const docs = getDocsByType(member, item.type);
+                              return (
+                                <div key={item.key} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                                  <div className="text-xs font-semibold text-slate-700">{item.label}</div>
+                                  <div className="mt-2 grid gap-2 md:grid-cols-3">
+                                    <div className="space-y-1">
+                                      <div className="text-[11px] text-slate-500">Pertenece a</div>
+                                      <select
+                                        className={selectClassName}
+                                        value={getOwnerValue(member.id, item.type)}
+                                        disabled={step5Locked}
+                                        onChange={(event) =>
+                                          setOwnerValue(member.id, item.type, event.target.value)
+                                        }
+                                      >
+                                        {ownerOptions.map((option) => (
+                                          <option key={option} value={option}>
+                                            {option}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    {item.key === "paymentProof" ? (
+                                      <div className="space-y-1">
+                                        <div className="text-[11px] text-slate-500">Concepto</div>
+                                        <select
+                                          className={selectClassName}
+                                          value={getConceptValue(member.id, item.type)}
+                                          disabled={step5Locked}
+                                          onChange={(event) =>
+                                            setConceptValue(member.id, item.type, event.target.value)
+                                          }
+                                        >
+                                          {paymentConceptOptions.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                    ) : null}
+                                    {item.key === "paymentProof" &&
+                                    getConceptValue(member.id, item.type) === "OTHER" ? (
+                                      <div className="space-y-1 md:col-span-2">
+                                        <div className="text-[11px] text-slate-500">Detalle concepto</div>
+                                        <input
+                                          className={inputClassName}
+                                          value={getConceptOtherValue(member.id, item.type)}
+                                          disabled={step5Locked}
+                                          onChange={(event) =>
+                                            setConceptOtherValue(member.id, item.type, event.target.value)
+                                          }
+                                        />
+                                      </div>
+                                    ) : null}
+                                    <div className="space-y-1 md:col-span-2">
+                                      <div className="text-[11px] text-slate-500">Adjuntar documentos</div>
+                                      <input
+                                        className={inputClassName}
+                                        type="file"
+                                        multiple
+                                        disabled={step5Locked}
+                                        onChange={(event) => {
+                                          const nextDocs = addDocuments(
+                                            member,
+                                            item.type,
+                                            getOwnerValue(member.id, item.type),
+                                            event.target.files,
+                                            item.key === "paymentProof"
+                                              ? {
+                                                  concept: getConceptValue(member.id, item.type),
+                                                  conceptOther: getConceptOtherValue(member.id, item.type),
+                                                }
+                                              : undefined,
+                                          );
+                                          if (nextDocs.length !== member.documents.length) {
+                                            scheduleUpdate(
+                                              member.id,
+                                              { documents: nextDocs },
+                                              `${member.id}:documents:${item.key}`,
+                                            );
+                                          }
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                  {docs.length > 0 ? (
+                                    <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-600">
+                                      {docs.map((doc) => (
+                                        <span key={doc.id} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-0.5">
+                                          {doc.fileName} · {doc.ownerName}
+                                          {formatDocConcept(doc) ? ` · ${formatDocConcept(doc)}` : ""}
+                                          {!step5Locked ? (
+                                            <button
+                                              type="button"
+                                              className="text-slate-500 hover:text-slate-900"
+                                              onClick={() =>
+                                                scheduleUpdate(
+                                                  member.id,
+                                                  { documents: removeDocument(member, doc.id) },
+                                                  `${member.id}:documents:remove:${doc.id}`,
+                                                )
+                                              }
+                                            >
+                                              x
+                                            </button>
+                                          ) : null}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
 
@@ -2451,137 +3569,332 @@ export const TripMembersTable = ({
       );
     }
 
-    if (modStep === "STEP2") {
+    if (modStep === "STEP3") {
       return (
-        <div className="grid gap-3 md:grid-cols-3">
-          <div className="space-y-1">
-            <div className="text-xs font-semibold text-slate-600">Desea seguro</div>
-            <select
-              className={selectClassName}
-              value={
-                draft.wantsInsurance === null
-                  ? ""
-                  : draft.wantsInsurance
-                    ? "YES"
-                    : "NO"
-              }
-              onChange={(event) => {
-                const nextValue = event.target.value;
-                const wantsInsurance = nextValue === "" ? null : nextValue === "YES";
-                const nextDocs = wantsInsurance === false
-                  ? draft.documents
-                  : draft.documents.filter((doc) => doc.type !== "INSURANCE");
-                updateDraft({
-                  wantsInsurance,
-                  hasOwnInsurance: wantsInsurance === false ? null : null,
-                  documents: nextDocs,
-                  docFlags: {
-                    ...draft.docFlags,
-                    insurance: false,
-                  },
-                });
-              }}
-            >
-              <option value="">Selecciona</option>
-              <option value="YES">Si</option>
-              <option value="NO">No</option>
-            </select>
-          </div>
-          {draft.wantsInsurance === true ? (
-            <div className="space-y-1">
-              <div className="text-xs font-semibold text-slate-600">Tipo de seguro</div>
-              <select
-                className={selectClassName}
-                value={draft.insuranceId}
-                onChange={(event) =>
-                  handleDraftSelectChange(
-                    { insuranceId: event.target.value },
-                    {
-                      catalogName: "insurances",
-                      field: "insuranceId",
-                    },
-                  )
-                }
+        <div className="space-y-3">
+          <div className="rounded-md border border-slate-200 bg-white p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-slate-700">Titular</div>
+              <Button
+                size="sm"
+                className="h-6 bg-blue-500 px-2 text-[11px] text-white hover:bg-blue-600"
+                onClick={() => setModExpandedInsuranceTitular((prev) => !prev)}
               >
-                <option value="">Selecciona</option>
-                {catalogOptions.insurances.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
+                {modExpandedInsuranceTitular ? "Listo" : "Editar"}
+              </Button>
             </div>
-          ) : null}
-          {draft.wantsInsurance === false ? (
-            <>
-              <div className="space-y-1">
-                <div className="text-xs font-semibold text-slate-600">Tiene seguro propio</div>
-                <select
-                  className={selectClassName}
-                  value={
-                    draft.hasOwnInsurance === null
-                      ? ""
-                      : draft.hasOwnInsurance
-                        ? "YES"
-                        : "NO"
-                  }
-                  onChange={(event) => {
-                    const nextValue = event.target.value;
-                    const hasOwnInsurance = nextValue === "" ? null : nextValue === "YES";
-                    const nextDocs = hasOwnInsurance
-                      ? draft.documents
-                      : draft.documents.filter((doc) => doc.type !== "INSURANCE");
-                    updateDraft({
-                      hasOwnInsurance,
-                      documents: nextDocs,
-                      docFlags: {
-                        ...draft.docFlags,
-                        insurance: hasOwnInsurance ? draft.docFlags.insurance : false,
-                      },
-                    });
-                  }}
-                >
-                  <option value="">Selecciona</option>
-                  <option value="YES">Si</option>
-                  <option value="NO">No</option>
-                </select>
-              </div>
-              {draft.hasOwnInsurance === false ? (
-                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 md:col-span-2">
-                  El cliente renuncia al seguro
+            {modExpandedInsuranceTitular ? (
+              <div className="mt-2 grid gap-3 md:grid-cols-3">
+                <div className="space-y-1">
+                  <div className="text-xs font-semibold text-slate-600">Desea seguro</div>
+                  <select
+                    className={selectClassName}
+                    value={
+                      draft.wantsInsurance === null
+                        ? ""
+                        : draft.wantsInsurance
+                          ? "YES"
+                          : "NO"
+                    }
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      const wantsInsurance = nextValue === "" ? null : nextValue === "YES";
+                      const nextDocs = wantsInsurance === false
+                        ? draft.documents
+                        : draft.documents.filter((doc) => doc.type !== "INSURANCE");
+                      updateDraft({
+                        wantsInsurance,
+                        hasOwnInsurance: wantsInsurance === false ? null : null,
+                        documents: nextDocs,
+                        docFlags: {
+                          ...draft.docFlags,
+                          insurance: false,
+                        },
+                      });
+                    }}
+                  >
+                    <option value="">Selecciona</option>
+                    <option value="YES">Si</option>
+                    <option value="NO">No</option>
+                  </select>
                 </div>
-              ) : null}
-            </>
-          ) : null}
-          <div className="space-y-1">
-            <div className="text-xs font-semibold text-slate-600">Contacto de emergencia</div>
-            <input
-              className={inputClassName}
-              value={draft.emergencyContactName}
-              onChange={(event) => updateDraft({ emergencyContactName: event.target.value })}
-            />
+                {draft.wantsInsurance === true ? (
+                  <div className="space-y-1">
+                    <div className="text-xs font-semibold text-slate-600">Tipo de seguro</div>
+                    <select
+                      className={selectClassName}
+                      value={draft.insuranceId}
+                      onChange={(event) =>
+                        handleDraftSelectChange(
+                          { insuranceId: event.target.value },
+                          {
+                            catalogName: "insurances",
+                            field: "insuranceId",
+                          },
+                        )
+                      }
+                    >
+                      <option value="">Selecciona</option>
+                      {catalogOptions.insurances.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+                {draft.wantsInsurance === false ? (
+                  <>
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-slate-600">Tiene seguro propio</div>
+                      <select
+                        className={selectClassName}
+                        value={
+                          draft.hasOwnInsurance === null
+                            ? ""
+                            : draft.hasOwnInsurance
+                              ? "YES"
+                              : "NO"
+                        }
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          const hasOwnInsurance = nextValue === "" ? null : nextValue === "YES";
+                          const nextDocs = hasOwnInsurance
+                            ? draft.documents
+                            : draft.documents.filter((doc) => doc.type !== "INSURANCE");
+                                      updateDraft({
+                                        hasOwnInsurance,
+                                        documents: nextDocs,
+                                      });
+                        }}
+                      >
+                        <option value="">Selecciona</option>
+                        <option value="YES">Si</option>
+                        <option value="NO">No</option>
+                      </select>
+                    </div>
+                    {draft.hasOwnInsurance === false ? (
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 md:col-span-2">
+                        El cliente renuncia al seguro
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
+                <div className="space-y-1">
+                  <div className="text-xs font-semibold text-slate-600">Contacto de emergencia</div>
+                  <input
+                    className={inputClassName}
+                    value={draft.emergencyContactName}
+                    onChange={(event) => updateDraft({ emergencyContactName: event.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <div className="text-xs font-semibold text-slate-600">Telefono emergencia</div>
+                  <input
+                    className={inputClassName}
+                    value={draft.emergencyContactPhone}
+                    onChange={(event) => updateDraft({ emergencyContactPhone: event.target.value })}
+                  />
+                </div>
+                <div className="space-y-1 md:col-span-3">
+                  <div className="text-xs font-semibold text-slate-600">Situaciones especiales</div>
+                  <textarea
+                    className="min-h-[60px] w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900"
+                    value={draft.specialSituations}
+                    onChange={(event) => updateDraft({ specialSituations: event.target.value })}
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
-          <div className="space-y-1">
-            <div className="text-xs font-semibold text-slate-600">Telefono emergencia</div>
-            <input
-              className={inputClassName}
-              value={draft.emergencyContactPhone}
-              onChange={(event) => updateDraft({ emergencyContactPhone: event.target.value })}
-            />
-          </div>
-          <div className="space-y-1 md:col-span-3">
-            <div className="text-xs font-semibold text-slate-600">Situaciones especiales</div>
-            <textarea
-              className="min-h-[60px] w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900"
-              value={draft.specialSituations}
-              onChange={(event) => updateDraft({ specialSituations: event.target.value })}
-            />
-          </div>
+
+          {draft.companions.map((companion, index) => {
+            const isExpanded = modExpandedInsuranceIndex === index;
+            return (
+              <div key={companion.id} className="rounded-md border border-slate-200 bg-white p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-semibold text-slate-700">
+                    Acompanante {index + 1}
+                    {companion.fullName ? ` · ${companion.fullName}` : ""}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      className="h-6 bg-blue-500 px-2 text-[11px] text-white hover:bg-blue-600"
+                      onClick={() => {
+                        setModExpandedInsuranceIndex((prev) => (prev === index ? null : index));
+                      }}
+                    >
+                      {isExpanded ? "Listo" : "Editar"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="h-6 bg-red-500 px-2 text-[11px] text-white hover:bg-red-600"
+                      onClick={() => {
+                        const next = draft.companions.filter((_, i) => i !== index);
+                        updateCompanionsDraft(next);
+                        if (next.length === 0) {
+                          setModExpandedInsuranceIndex(0);
+                          return;
+                        }
+                        setModExpandedInsuranceIndex((prev) =>
+                          prev === null
+                            ? 0
+                            : prev > index
+                              ? prev - 1
+                              : Math.min(prev, next.length - 1),
+                        );
+                      }}
+                    >
+                      Eliminar
+                    </Button>
+                  </div>
+                </div>
+                {isExpanded ? (
+                  <div className="mt-2 grid gap-3 md:grid-cols-3">
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-slate-600">Desea seguro</div>
+                      <select
+                        className={selectClassName}
+                        value={
+                          companion.wantsInsurance === null
+                            ? ""
+                            : companion.wantsInsurance
+                              ? "YES"
+                              : "NO"
+                        }
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          const wantsInsurance = nextValue === "" ? null : nextValue === "YES";
+                          const next = [...draft.companions];
+                          next[index] = {
+                            ...companion,
+                            wantsInsurance,
+                            hasOwnInsurance: wantsInsurance === false ? null : null,
+                          };
+                          updateCompanionsDraft(next);
+                        }}
+                      >
+                        <option value="">Selecciona</option>
+                        <option value="YES">Si</option>
+                        <option value="NO">No</option>
+                      </select>
+                    </div>
+                    {companion.wantsInsurance === true ? (
+                      <div className="space-y-1">
+                        <div className="text-xs font-semibold text-slate-600">Tipo de seguro</div>
+                        <select
+                          className={selectClassName}
+                          value={companion.insuranceId}
+                          onChange={(event) => {
+                            const next = [...draft.companions];
+                            next[index] = {
+                              ...companion,
+                              insuranceId: event.target.value,
+                            };
+                            updateCompanionsDraft(next);
+                          }}
+                        >
+                          <option value="">Selecciona</option>
+                          {catalogOptions.insurances.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
+                    {companion.wantsInsurance === false ? (
+                      <>
+                        <div className="space-y-1">
+                          <div className="text-xs font-semibold text-slate-600">Tiene seguro propio</div>
+                          <select
+                            className={selectClassName}
+                            value={
+                              companion.hasOwnInsurance === null
+                                ? ""
+                                : companion.hasOwnInsurance
+                                  ? "YES"
+                                  : "NO"
+                            }
+                            onChange={(event) => {
+                              const nextValue = event.target.value;
+                              const hasOwnInsurance = nextValue === "" ? null : nextValue === "YES";
+                              const next = [...draft.companions];
+                              next[index] = {
+                                ...companion,
+                                hasOwnInsurance,
+                              };
+                              updateCompanionsDraft(next);
+                            }}
+                          >
+                            <option value="">Selecciona</option>
+                            <option value="YES">Si</option>
+                            <option value="NO">No</option>
+                          </select>
+                        </div>
+                        {companion.hasOwnInsurance === false ? (
+                          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 md:col-span-2">
+                            El cliente renuncia al seguro
+                          </div>
+                        ) : null}
+                      </>
+                    ) : null}
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-slate-600">Contacto de emergencia</div>
+                      <input
+                        className={inputClassName}
+                        value={companion.emergencyContactName}
+                        onChange={(event) => {
+                          const next = [...draft.companions];
+                          next[index] = {
+                            ...companion,
+                            emergencyContactName: event.target.value,
+                          };
+                          updateCompanionsDraft(next);
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-slate-600">Telefono emergencia</div>
+                      <input
+                        className={inputClassName}
+                        value={companion.emergencyContactPhone}
+                        onChange={(event) => {
+                          const next = [...draft.companions];
+                          next[index] = {
+                            ...companion,
+                            emergencyContactPhone: event.target.value,
+                          };
+                          updateCompanionsDraft(next);
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-1 md:col-span-3">
+                      <div className="text-xs font-semibold text-slate-600">Situaciones especiales</div>
+                      <textarea
+                        className="min-h-[60px] w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900"
+                        value={companion.specialSituations}
+                        onChange={(event) => {
+                          const next = [...draft.companions];
+                          next[index] = {
+                            ...companion,
+                            specialSituations: event.target.value,
+                          };
+                          updateCompanionsDraft(next);
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       );
     }
 
-    if (modStep === "STEP3") {
+    if (modStep === "STEP2") {
       return (
         <div className="space-y-3">
           <div className="grid gap-3 md:grid-cols-3">
@@ -2607,6 +3920,7 @@ export const TripMembersTable = ({
                       docFlags: { ...draft.docFlags, minorPermit: false },
                       documents: draft.documents.filter((doc) => doc.type !== "MINOR_PERMIT"),
                     });
+                    setModExpandedCompanionIndex(0);
                     return;
                   }
                   if (!hasCompanions) {
@@ -2618,9 +3932,11 @@ export const TripMembersTable = ({
                       docFlags: { ...draft.docFlags, minorPermit: false },
                       documents: draft.documents.filter((doc) => doc.type !== "MINOR_PERMIT"),
                     });
+                    setModExpandedCompanionIndex(0);
                     return;
                   }
                   updateDraft({ hasCompanions: true });
+                  setModExpandedCompanionIndex(0);
                 }}
               >
                 <option value="">Selecciona</option>
@@ -2632,62 +3948,174 @@ export const TripMembersTable = ({
 
           {draft.hasCompanions ? (
             <div className="space-y-2">
-              {draft.companions.map((companion, index) => (
-                <div
-                  key={companion.id}
-                  className="grid gap-3 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-4"
-                >
-                  <div className="space-y-1 md:col-span-2">
-                    <div className="text-xs font-semibold text-slate-600">Nombre completo</div>
-                    <input
-                      className={inputClassName}
-                      value={companion.fullName}
-                      onChange={(event) => {
-                        const next = [...draft.companions];
-                        next[index] = { ...companion, fullName: event.target.value };
-                        updateCompanionsDraft(next);
-                      }}
-                    />
+              {draft.companions.map((companion, index) => {
+                const isExpanded = modExpandedCompanionIndex === index;
+                return (
+                  <div
+                    key={companion.id}
+                    className="space-y-3 rounded-md border border-slate-200 bg-white p-3"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold text-slate-700">
+                        <span className="inline-flex items-center rounded-full bg-cyan-100 px-2 py-0.5 text-[11px] font-semibold text-cyan-900">
+                          Acompanante {index + 1}
+                        </span>
+                        {companion.fullName ? ` · ${companion.fullName}` : ""}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          className="h-6 bg-blue-500 px-2 text-[11px] text-white hover:bg-blue-600"
+                          onClick={() => {
+                            setModExpandedCompanionIndex((prev) => (prev === index ? null : index));
+                          }}
+                        >
+                          {isExpanded ? "Listo" : "Editar"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="h-6 bg-red-500 px-2 text-[11px] text-white hover:bg-red-600"
+                          onClick={() => {
+                            const next = draft.companions.filter((_, i) => i !== index);
+                            updateCompanionsDraft(next);
+                            if (next.length === 0) {
+                              setModExpandedCompanionIndex(0);
+                              return;
+                            }
+                            setModExpandedCompanionIndex((prev) =>
+                              prev === null
+                                ? 0
+                                : prev > index
+                                  ? prev - 1
+                                  : Math.min(prev, next.length - 1),
+                            );
+                          }}
+                        >
+                          Eliminar
+                        </Button>
+                      </div>
+                    </div>
+                    {isExpanded ? (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-1">
+                          <div className="text-xs font-semibold text-slate-600">Nombre completo</div>
+                          <input
+                            className={inputClassName}
+                            value={companion.fullName}
+                            onChange={(event) => {
+                              const next = [...draft.companions];
+                              next[index] = { ...companion, fullName: event.target.value };
+                              updateCompanionsDraft(next);
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-xs font-semibold text-slate-600">Identificacion</div>
+                          <input
+                            className={inputClassName}
+                            value={companion.identification}
+                            onChange={(event) => {
+                              const next = [...draft.companions];
+                              next[index] = { ...companion, identification: event.target.value };
+                              updateCompanionsDraft(next);
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-xs font-semibold text-slate-600">Correo</div>
+                          <input
+                            className={inputClassName}
+                            value={companion.email}
+                            onChange={(event) => {
+                              const next = [...draft.companions];
+                              next[index] = { ...companion, email: event.target.value };
+                              updateCompanionsDraft(next);
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-xs font-semibold text-slate-600">Telefono</div>
+                          <input
+                            className={inputClassName}
+                            value={companion.phone}
+                            onChange={(event) => {
+                              const next = [...draft.companions];
+                              next[index] = { ...companion, phone: event.target.value };
+                              updateCompanionsDraft(next);
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1 md:col-span-2">
+                          <div className="text-xs font-semibold text-slate-600">Direccion exacta</div>
+                          <input
+                            className={inputClassName}
+                            value={companion.address}
+                            onChange={(event) => {
+                              const next = [...draft.companions];
+                              next[index] = { ...companion, address: event.target.value };
+                              updateCompanionsDraft(next);
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-xs font-semibold text-slate-600">Estado civil</div>
+                          <select
+                            className={selectClassName}
+                            value={companion.maritalStatus}
+                            onChange={(event) => {
+                              const next = [...draft.companions];
+                              next[index] = {
+                                ...companion,
+                                maritalStatus: event.target.value as MaritalStatus | "",
+                              };
+                              updateCompanionsDraft(next);
+                            }}
+                          >
+                            <option value="">Selecciona</option>
+                            {maritalOptions.map((item) => (
+                              <option key={item.value} value={item.value}>
+                                {item.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-xs font-semibold text-slate-600">Nacionalidad</div>
+                          <select
+                            className={selectClassName}
+                            value={companion.nationalityId}
+                            onChange={(event) => {
+                              const next = [...draft.companions];
+                              next[index] = { ...companion, nationalityId: event.target.value };
+                              updateCompanionsDraft(next);
+                            }}
+                          >
+                            <option value="">Selecciona</option>
+                            {catalogOptions.nationalities.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1 md:col-span-2">
+                          <div className="text-xs font-semibold text-slate-600">Profesion u ocupacion</div>
+                          <input
+                            className={inputClassName}
+                            value={companion.profession}
+                            onChange={(event) => {
+                              const next = [...draft.companions];
+                              next[index] = { ...companion, profession: event.target.value };
+                              updateCompanionsDraft(next);
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className="flex items-center justify-end" />
                   </div>
-                  <div className="space-y-1">
-                    <div className="text-xs font-semibold text-slate-600">Identificacion (si aplica)</div>
-                    <input
-                      className={inputClassName}
-                      value={companion.identification}
-                      onChange={(event) => {
-                        const next = [...draft.companions];
-                        next[index] = { ...companion, identification: event.target.value };
-                        updateCompanionsDraft(next);
-                      }}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <label className="flex items-center gap-2 text-xs text-slate-600">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-slate-300"
-                        checked={companion.isMinor}
-                        onChange={(event) => {
-                          const next = [...draft.companions];
-                          next[index] = { ...companion, isMinor: event.target.checked };
-                          updateCompanionsDraft(next);
-                        }}
-                      />
-                      Menor de edad
-                    </label>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        const next = draft.companions.filter((_, i) => i !== index);
-                        updateCompanionsDraft(next);
-                      }}
-                    >
-                      Eliminar
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
               <Button
                 size="sm"
                 variant="outline"
@@ -2698,14 +4126,88 @@ export const TripMembersTable = ({
                       id: `${draft.id}-companion-${Date.now()}`,
                       fullName: "",
                       identification: "",
+                      email: "",
+                      phone: "",
+                      address: "",
+                      maritalStatus: "" as MaritalStatus | "",
+                      nationalityId: "",
+                      profession: "",
                       isMinor: false,
+                      wantsInsurance: null,
+                      insuranceId: "",
+                      hasOwnInsurance: null,
+                      emergencyContactName: "",
+                      emergencyContactPhone: "",
+                      specialSituations: "",
                     },
                   ];
                   updateCompanionsDraft(next);
+                  setModExpandedCompanionIndex(next.length - 1);
                 }}
               >
                 Agregar acompanante
               </Button>
+            </div>
+          ) : null}
+
+          {draft.hasCompanions ? (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-xs text-slate-600">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-slate-300"
+                  checked={draft.companions.some((companion) => companion.isMinor)}
+                  disabled={draft.companions.length === 0}
+                  onChange={(event) => {
+                    if (draft.companions.length === 0) {
+                      return;
+                    }
+                    if (!event.target.checked) {
+                      const next = draft.companions.map((companion) => ({
+                        ...companion,
+                        isMinor: false,
+                      }));
+                      updateCompanionsDraft(next);
+                      return;
+                    }
+                    const hasAny = draft.companions.some((companion) => companion.isMinor);
+                    if (hasAny) {
+                      return;
+                    }
+                    const next = draft.companions.map((companion, idx) => ({
+                      ...companion,
+                      isMinor: idx === 0,
+                    }));
+                    updateCompanionsDraft(next);
+                  }}
+                />
+                Hay menores de edad
+              </label>
+              {draft.companions.some((companion) => companion.isMinor) ? (
+                <div className="grid gap-2 md:grid-cols-2">
+                  {draft.companions.map((companion, idx) => (
+                    <label
+                      key={companion.id}
+                      className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600"
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300"
+                        checked={companion.isMinor}
+                        onChange={(event) => {
+                          const next = [...draft.companions];
+                          next[idx] = {
+                            ...companion,
+                            isMinor: event.target.checked,
+                          };
+                          updateCompanionsDraft(next);
+                        }}
+                      />
+                      {companion.fullName || `Acompanante ${idx + 1}`}
+                    </label>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -2767,7 +4269,7 @@ export const TripMembersTable = ({
               { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType, enabled: true },
               {
                 key: "paymentProof",
-                label: "Pago inicial",
+                label: "Pagos",
                 type: "PAYMENT_PROOF" as DocumentType,
                 enabled: true,
               },
@@ -2781,7 +4283,9 @@ export const TripMembersTable = ({
                 key: "insurance",
                 label: "Seguro propio",
                 type: "INSURANCE" as DocumentType,
-                enabled: draft.hasOwnInsurance === true,
+                enabled:
+                  draft.hasOwnInsurance === true ||
+                  draft.companions.some((companion) => companion.hasOwnInsurance === true),
               },
             ]
           ).map((item) => (
@@ -2805,7 +4309,17 @@ export const TripMembersTable = ({
                   });
                 }}
               />
-              <span className={!item.enabled ? "text-slate-300" : ""}>{item.label}</span>
+              <span
+                className={
+                  !item.enabled
+                    ? "text-slate-300"
+                    : getDocsByType(draft, item.type).length > 0
+                      ? "rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700"
+                      : "rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-rose-700"
+                }
+              >
+                {item.label}
+              </span>
             </label>
           ))}
         </div>
@@ -2814,7 +4328,7 @@ export const TripMembersTable = ({
           [
             { key: "idCard", label: "Cedula", type: "ID_CARD" as DocumentType },
             { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType },
-            { key: "paymentProof", label: "Pago inicial", type: "PAYMENT_PROOF" as DocumentType },
+            { key: "paymentProof", label: "Pagos", type: "PAYMENT_PROOF" as DocumentType },
             { key: "minorPermit", label: "Permiso menor", type: "MINOR_PERMIT" as DocumentType },
             { key: "insurance", label: "Seguro propio", type: "INSURANCE" as DocumentType },
           ]
@@ -2848,6 +4362,37 @@ export const TripMembersTable = ({
                     ))}
                   </select>
                 </div>
+                {item.key === "paymentProof" ? (
+                  <div className="space-y-1">
+                    <div className="text-[11px] text-slate-500">Concepto</div>
+                    <select
+                      className={selectClassName}
+                      value={getConceptValue(draft.id, item.type)}
+                      onChange={(event) =>
+                        setConceptValue(draft.id, item.type, event.target.value)
+                      }
+                    >
+                      {paymentConceptOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+                {item.key === "paymentProof" &&
+                getConceptValue(draft.id, item.type) === "OTHER" ? (
+                  <div className="space-y-1 md:col-span-2">
+                    <div className="text-[11px] text-slate-500">Detalle concepto</div>
+                    <input
+                      className={inputClassName}
+                      value={getConceptOtherValue(draft.id, item.type)}
+                      onChange={(event) =>
+                        setConceptOtherValue(draft.id, item.type, event.target.value)
+                      }
+                    />
+                  </div>
+                ) : null}
                 <div className="space-y-1 md:col-span-2">
                   <div className="text-[11px] text-slate-500">Adjuntar documentos</div>
                   <input
@@ -2860,6 +4405,12 @@ export const TripMembersTable = ({
                         item.type,
                         getOwnerValue(draft.id, item.type),
                         event.target.files,
+                        item.key === "paymentProof"
+                          ? {
+                              concept: getConceptValue(draft.id, item.type),
+                              conceptOther: getConceptOtherValue(draft.id, item.type),
+                            }
+                          : undefined,
                       );
                       if (nextDocs.length !== draft.documents.length) {
                         updateDraft({ documents: nextDocs });
@@ -2876,6 +4427,7 @@ export const TripMembersTable = ({
                       className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-0.5"
                     >
                       {doc.fileName} · {doc.ownerName}
+                      {formatDocConcept(doc) ? ` · ${formatDocConcept(doc)}` : ""}
                       <button
                         type="button"
                         className="text-slate-500 hover:text-slate-900"
@@ -2897,6 +4449,7 @@ export const TripMembersTable = ({
   };
 
   const summaryMember = sentSummaryDialog.member;
+  const summaryPricing = summaryMember ? calculatePackageTotals(summaryMember) : null;
 
   return (
     <div className="space-y-4">
@@ -2905,6 +4458,9 @@ export const TripMembersTable = ({
         <AddTripMemberDialog
           tripId={tripId}
           tripName={tripName}
+          tripLodgingType={tripLodgingType}
+          tripPackageBasePrice={tripPackageBasePrice}
+          tripReservationMinPerPerson={tripReservationMinPerPerson}
           repo={repo}
           users={users}
           currentUser={currentUser}
@@ -2962,10 +4518,10 @@ export const TripMembersTable = ({
                     value={modStep}
                     onChange={(event) => setModStep(event.target.value as ContractModificationStep)}
                   >
-                    <option value="STEP1">Paso 1</option>
-                    <option value="STEP2">Paso 2</option>
-                    <option value="STEP3">Paso 3</option>
-                    <option value="STEP4">Paso 4</option>
+                    <option value="STEP1">Paso 1 · Datos del viaje</option>
+                    <option value="STEP2">Paso 2 · Acompanantes</option>
+                    <option value="STEP3">Paso 3 · Seguro y emergencia</option>
+                    <option value="STEP4">Paso 4 · Documentos</option>
                   </select>
                 </div>
               </div>
@@ -3098,9 +4654,9 @@ export const TripMembersTable = ({
                   </div>
                 ) : null}
 
-                {sentSummaryStep === "STEP2" ? (
+                {sentSummaryStep === "STEP3" ? (
                   <div className="rounded-md border border-slate-200 bg-white p-3">
-                    <div className="text-xs font-semibold text-slate-600">Paso 2 · Seguro y emergencia</div>
+                    <div className="text-xs font-semibold text-slate-600">Paso 3 · Seguro y emergencia</div>
                     <div className="mt-2 grid gap-2 md:grid-cols-2">
                       <div>
                         <div className="text-[11px] text-slate-500">Desea seguro</div>
@@ -3146,9 +4702,9 @@ export const TripMembersTable = ({
                   </div>
                 ) : null}
 
-                {sentSummaryStep === "STEP3" ? (
+                {sentSummaryStep === "STEP2" ? (
                   <div className="rounded-md border border-slate-200 bg-white p-3">
-                    <div className="text-xs font-semibold text-slate-600">Paso 3 · Acompanantes</div>
+                    <div className="text-xs font-semibold text-slate-600">Paso 2 · Acompanantes</div>
                     <div className="mt-2 space-y-2">
                       <div>
                         <div className="text-[11px] text-slate-500">Acompanantes</div>
@@ -3191,13 +4747,96 @@ export const TripMembersTable = ({
 
                 {sentSummaryStep === "STEP4" ? (
                   <div className="rounded-md border border-slate-200 bg-white p-3">
-                    <div className="text-xs font-semibold text-slate-600">Paso 4 · Documentos</div>
+                    <div className="text-xs font-semibold text-slate-600">Paso 4 · Adicionales</div>
+                    <div className="mt-2 grid gap-2 md:grid-cols-2">
+                      <div>
+                        <div className="text-[11px] text-slate-500">Acomodacion</div>
+                        <div>{summaryMember.accommodationType || "-"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Asientos</div>
+                        <div>{summaryMember.seats || "-"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Precio por asiento</div>
+                        <div>USD {(summaryMember.seatUnitPrice ?? 0).toFixed(2)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Equipaje</div>
+                        <div>
+                          {summaryMember.luggageType || "-"} · {summaryMember.luggageQuantity ?? 0} x USD {(
+                            summaryMember.luggageUnitPrice ?? 0
+                          ).toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      <div className="text-[11px] text-slate-500">Tours extra</div>
+                      {summaryMember.extraTours.length === 0 ? (
+                        <div>-</div>
+                      ) : (
+                        <div className="space-y-1">
+                          {summaryMember.extraTours.map((tour) => (
+                            <div key={tour.id} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                              {tour.label || "(Sin detalle)"} · {tour.quantity ?? 0} x USD {(
+                                tour.unitPrice ?? 0
+                              ).toFixed(2)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-3 grid gap-2 md:grid-cols-3">
+                      <div>
+                        <div className="text-[11px] text-slate-500">Precio base paquete</div>
+                        <div>USD {(summaryMember.packageBasePrice ?? 0).toFixed(2)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Reserva minima</div>
+                        <div>USD {(summaryMember.reservationMinPerPerson ?? 0).toFixed(2)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Plazo cuotas</div>
+                        <div>{summaryMember.paymentPlanMonths ?? "-"} meses</div>
+                      </div>
+                    </div>
+                    {summaryPricing ? (
+                      <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-2 py-2">
+                        <div className="grid gap-2 md:grid-cols-3">
+                          <div>
+                            <div className="text-[11px] text-slate-500">Total paquete</div>
+                            <div className="font-semibold text-slate-900">
+                              USD {summaryPricing.total.toFixed(2)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] text-slate-500">Reserva por persona</div>
+                            <div className="font-semibold text-slate-900">
+                              USD {summaryPricing.reservationPerPerson.toFixed(2)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] text-slate-500">Reserva total</div>
+                            <div className="font-semibold text-slate-900">
+                              USD {(summaryPricing.reservationPerPerson * summaryPricing.seats).toFixed(2)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {sentSummaryStep === "STEP5" ? (
+                  <div className="rounded-md border border-slate-200 bg-white p-3">
+                    <div className="text-xs font-semibold text-slate-600">Paso 5 · Documentos</div>
                     <div className="mt-2 space-y-2">
                       {[
                         { label: "Cedula", type: "ID_CARD" as DocumentType },
                         { label: "Pasaporte", type: "PASSPORT" as DocumentType },
                         { label: "Permiso menor", type: "MINOR_PERMIT" as DocumentType },
                         { label: "Seguro propio", type: "INSURANCE" as DocumentType },
+                        { label: "Pagos", type: "PAYMENT_PROOF" as DocumentType },
                       ].map((item) => {
                         const docs = getDocsByType(summaryMember, item.type);
                         if (docs.length === 0) {
@@ -3210,6 +4849,7 @@ export const TripMembersTable = ({
                               {docs.map((doc) => (
                                 <span key={doc.id} className="rounded-full border border-slate-200 bg-white px-2 py-0.5">
                                   {doc.fileName} · {doc.ownerName}
+                                  {formatDocConcept(doc) ? ` · ${formatDocConcept(doc)}` : ""}
                                 </span>
                               ))}
                             </div>
@@ -3220,27 +4860,6 @@ export const TripMembersTable = ({
                   </div>
                 ) : null}
 
-                {sentSummaryStep === "STEP5" ? (
-                  <div className="rounded-md border border-slate-200 bg-white p-3">
-                    <div className="text-xs font-semibold text-slate-600">Paso 5 · Pago inicial</div>
-                    <div className="mt-2 space-y-2">
-                      {getDocsByType(summaryMember, "PAYMENT_PROOF").length === 0 ? (
-                        <div className="text-xs text-slate-500">Sin comprobantes</div>
-                      ) : (
-                        <div className="flex flex-wrap gap-2">
-                          {getDocsByType(summaryMember, "PAYMENT_PROOF").map((doc) => (
-                            <span
-                              key={doc.id}
-                              className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px]"
-                            >
-                              {doc.fileName}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : null}
 
                 <div className="flex justify-end">
                   <Button variant="outline" onClick={() => setSentSummaryDialog({ open: false, member: null })}>

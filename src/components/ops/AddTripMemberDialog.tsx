@@ -61,6 +61,9 @@ type CatalogMap = Record<CatalogName, CatalogItem[]>;
 interface AddTripMemberDialogProps {
   tripId: string;
   tripName: string;
+  tripLodgingType: CreateTripMemberInput["packageLodgingType"];
+  tripPackageBasePrice: number;
+  tripReservationMinPerPerson: number;
   repo: IOpsRepo;
   users: User[];
   currentUser: User;
@@ -105,6 +108,9 @@ const quoteMonthOptions = [
 export const AddTripMemberDialog = ({
   tripId,
   tripName,
+  tripLodgingType,
+  tripPackageBasePrice,
+  tripReservationMinPerPerson,
   repo,
   users,
   currentUser,
@@ -235,6 +241,18 @@ export const AddTripMemberDialog = ({
       details: "",
       wantsReservation: true,
       packageName: tripName,
+      packageLodgingType: tripLodgingType,
+      packageBasePrice: tripPackageBasePrice,
+      packageFinalPrice: tripPackageBasePrice * seats,
+      reservationMinPerPerson: tripReservationMinPerPerson,
+      reservationFinalPerPerson: tripReservationMinPerPerson,
+      paymentPlanMonths: null,
+      accommodationType: "TWIN",
+      seatUnitPrice: null,
+      luggageType: "",
+      luggageQuantity: null,
+      luggageUnitPrice: null,
+      extraTours: [],
       address: "",
       maritalStatus: "",
       profession: "",

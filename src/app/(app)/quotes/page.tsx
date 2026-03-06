@@ -13,9 +13,11 @@ import {
   BillingStatus,
   ContractsStatus,
   QuoteStatus,
+  type BillingConfig,
   type QuoteDraft,
   type QuoteDraftSection,
   type QuoteLodgingStay,
+  type QuotePriceType,
   type CatalogItem,
   type CatalogName,
   type Lead,
@@ -45,6 +47,7 @@ export default function QuotesPage() {
     notes: "",
   });
   const [exchangeRate, setExchangeRate] = useState(500);
+  const [quoteConfig, setQuoteConfig] = useState<BillingConfig | null>(null);
   const [quoteWizardOpen, setQuoteWizardOpen] = useState(false);
   const [quoteWizardStep, setQuoteWizardStep] = useState(0);
   const [quoteWizardLead, setQuoteWizardLead] = useState<Lead | null>(null);
@@ -105,6 +108,10 @@ export default function QuotesPage() {
             quantity: null,
             unitPrice: null,
             selected: true,
+            priceType: "PER_PERSON",
+            customPax: null,
+            marginRate: null,
+            flightType: "INTERNATIONAL",
           },
           {
             id: makeDraftItemId(),
@@ -112,6 +119,10 @@ export default function QuotesPage() {
             quantity: null,
             unitPrice: null,
             selected: false,
+            priceType: "PER_PERSON",
+            customPax: null,
+            marginRate: null,
+            flightType: "INTERNATIONAL",
           },
         ],
       },
@@ -125,6 +136,9 @@ export default function QuotesPage() {
             quantity: null,
             unitPrice: null,
             selected: true,
+            priceType: "PER_PERSON",
+            customPax: null,
+            marginRate: null,
           },
         ],
       },
@@ -138,6 +152,9 @@ export default function QuotesPage() {
             quantity: null,
             unitPrice: null,
             selected: true,
+            priceType: "PER_GROUP",
+            customPax: null,
+            marginRate: null,
           },
           {
             id: makeDraftItemId(),
@@ -145,6 +162,9 @@ export default function QuotesPage() {
             quantity: null,
             unitPrice: null,
             selected: true,
+            priceType: "PER_GROUP",
+            customPax: null,
+            marginRate: null,
           },
         ],
       },
@@ -158,6 +178,9 @@ export default function QuotesPage() {
             quantity: null,
             unitPrice: null,
             selected: false,
+            priceType: "PER_PERSON",
+            customPax: null,
+            marginRate: null,
           },
           {
             id: makeDraftItemId(),
@@ -165,6 +188,9 @@ export default function QuotesPage() {
             quantity: null,
             unitPrice: null,
             selected: false,
+            priceType: "PER_PERSON",
+            customPax: null,
+            marginRate: null,
           },
         ],
       },
@@ -179,10 +205,33 @@ export default function QuotesPage() {
         mealPlan: "Desayuno incluido",
         detail: "",
         pricePerNight: null,
+        priceType: "PER_GROUP",
+        customPax: null,
+        marginRate: null,
       },
     ],
     notes: "",
     validUntil: "",
+  });
+
+  const normalizeQuoteDraft = (draft: QuoteDraft): QuoteDraft => ({
+    ...draft,
+    sections: draft.sections.map((section) => ({
+      ...section,
+      items: section.items.map((item) => ({
+        ...item,
+        priceType: item.priceType ?? "PER_PERSON",
+        customPax: item.customPax ?? null,
+        marginRate: item.marginRate ?? null,
+        flightType: section.id === "flights" ? item.flightType ?? "INTERNATIONAL" : undefined,
+      })),
+    })),
+    lodgingStays: draft.lodgingStays.map((stay) => ({
+      ...stay,
+      priceType: stay.priceType ?? "PER_GROUP",
+      customPax: stay.customPax ?? null,
+      marginRate: stay.marginRate ?? null,
+    })),
   });
 
   useEffect(() => {
@@ -214,6 +263,7 @@ export default function QuotesPage() {
         repo.getBillingConfig(),
       ]);
       setExchangeRate(billingConfig.exchangeRate);
+      setQuoteConfig(billingConfig);
       const pendingQuotes = leads.filter((lead) =>
         [
           QuoteStatus.SENT,
@@ -265,7 +315,7 @@ export default function QuotesPage() {
     if (!draft.lodgingStays || draft.lodgingStays.length === 0) {
       draft.lodgingStays = buildDefaultDraft().lodgingStays;
     }
-    setQuoteDraft(draft);
+    setQuoteDraft(normalizeQuoteDraft(draft));
     setQuoteWizardStep(0);
     setQuoteDraftError("");
     setQuoteWizardOpen(true);
@@ -293,7 +343,17 @@ export default function QuotesPage() {
       ...section,
       items: [
         ...section.items,
-        { id: makeDraftItemId(), label: "", quantity: null, unitPrice: null, selected: true },
+        {
+          id: makeDraftItemId(),
+          label: "",
+          quantity: null,
+          unitPrice: null,
+          selected: true,
+          priceType: "PER_PERSON",
+          customPax: null,
+          marginRate: null,
+          flightType: sectionId === "flights" ? "INTERNATIONAL" : undefined,
+        },
       ],
     }));
   };
@@ -336,6 +396,9 @@ export default function QuotesPage() {
             mealPlan: "Desayuno incluido",
             detail: "",
             pricePerNight: null,
+            priceType: "PER_GROUP",
+            customPax: null,
+            marginRate: null,
           },
         ],
       };
@@ -639,30 +702,140 @@ export default function QuotesPage() {
     return counts;
   }, [rows, statusTabs]);
 
-  const quoteTotalUsd = useMemo(() => {
-    if (!quoteDraft) {
+  const quotePartySizeValue = Number(quoteLeadDraft.quotePartySize || 0);
+
+  const resolveMarginRate = (
+    sectionId: QuoteDraftSection["id"],
+    marginRate: number | null | undefined,
+    flightType?: "INTERNATIONAL" | "DOMESTIC",
+  ) => {
+    if (typeof marginRate === "number") {
+      return marginRate;
+    }
+    const defaults = quoteConfig?.quoteMarginRates;
+    if (!defaults) {
       return 0;
     }
-    const staysTotal = quoteDraft.lodgingStays.reduce((sum, stay) => {
-      const nights = stay.nights ?? 0;
-      const price = stay.pricePerNight ?? 0;
-      return sum + nights * price;
-    }, 0);
-    return (
-      staysTotal +
-      quoteDraft.sections.reduce((sum, section) => {
-      const sectionTotal = section.items.reduce((sectionSum, item) => {
+    if (sectionId === "flights") {
+      return flightType === "DOMESTIC" ? defaults.flightsDomestic : defaults.flightsInternational;
+    }
+    if (sectionId === "tours") {
+      return defaults.tours;
+    }
+    if (sectionId === "transfers") {
+      return defaults.transfers;
+    }
+    if (sectionId === "extras") {
+      return defaults.extras;
+    }
+    return 0;
+  };
+
+  const resolveLodgingMarginRate = (marginRate: number | null | undefined) => {
+    if (typeof marginRate === "number") {
+      return marginRate;
+    }
+    return quoteConfig?.quoteMarginRates.lodging ?? 0;
+  };
+
+  const quoteTotals = useMemo(() => {
+    if (!quoteDraft) {
+      return {
+        baseSubtotal: 0,
+        marginTotal: 0,
+        subtotalWithMargin: 0,
+        cardFee: 0,
+        vendorCommission: 0,
+        taxAmount: 0,
+        totalBeforeFee: 0,
+        feePerPax: 0,
+        feeTotal: 0,
+        totalFinal: 0,
+        totalPerPerson: 0,
+        flightTicketPerPerson: 0,
+        reservationPerPerson: 0,
+      };
+    }
+
+    let baseSubtotal = 0;
+    let marginTotal = 0;
+    let subtotalWithMargin = 0;
+    let flightTicketPerPerson = 0;
+
+    quoteDraft.sections.forEach((section) => {
+      section.items.forEach((item) => {
         if (!item.selected) {
-          return sectionSum;
+          return;
         }
         const quantity = typeof item.quantity === "number" ? item.quantity : 0;
         const price = typeof item.unitPrice === "number" ? item.unitPrice : 0;
-        return sectionSum + quantity * price;
-      }, 0);
-      return sum + sectionTotal;
-    }, 0)
-    );
-  }, [quoteDraft]);
+        const paxMultiplier =
+          item.priceType === "PER_PERSON"
+            ? Number(item.customPax ?? quotePartySizeValue)
+            : 1;
+        const baseTotal = quantity * price * paxMultiplier;
+        const marginRate = resolveMarginRate(section.id, item.marginRate, item.flightType);
+        const marginAmount = baseTotal * marginRate;
+        baseSubtotal += baseTotal;
+        marginTotal += marginAmount;
+        subtotalWithMargin += baseTotal + marginAmount;
+
+        if (section.id === "flights" && item.priceType === "PER_PERSON") {
+          const perPersonTotal = quantity * price * (1 + marginRate);
+          flightTicketPerPerson += perPersonTotal;
+        }
+      });
+    });
+
+    quoteDraft.lodgingStays.forEach((stay) => {
+      const nights = stay.nights ?? 0;
+      const price = stay.pricePerNight ?? 0;
+      const paxMultiplier =
+        stay.priceType === "PER_PERSON"
+            ? Number(stay.customPax ?? quotePartySizeValue)
+          : 1;
+      const baseTotal = nights * price * paxMultiplier;
+      const marginRate = resolveLodgingMarginRate(stay.marginRate);
+      const marginAmount = baseTotal * marginRate;
+      baseSubtotal += baseTotal;
+      marginTotal += marginAmount;
+      subtotalWithMargin += baseTotal + marginAmount;
+    });
+
+    const cardFee = subtotalWithMargin * (quoteConfig?.cardFeeRate ?? 0);
+    const vendorCommission = subtotalWithMargin * (quoteConfig?.vendorCommissionRate ?? 0);
+    const taxAmount = subtotalWithMargin * (quoteConfig?.taxRate ?? 0);
+    const totalBeforeFee = subtotalWithMargin + cardFee + vendorCommission + taxAmount;
+
+    const feeTier = (quoteConfig?.perPaxFeeTiers ?? []).find((tier) => {
+      if (!quotePartySizeValue) {
+        return false;
+      }
+      const maxOk = tier.maxPax ? quotePartySizeValue <= tier.maxPax : true;
+      return quotePartySizeValue >= tier.minPax && maxOk;
+    });
+    const feePerPax = feeTier?.feePerPax ?? 0;
+    const feeTotal = feePerPax * (quotePartySizeValue || 0);
+    const totalFinal = totalBeforeFee + feeTotal;
+    const totalPerPerson = quotePartySizeValue ? totalFinal / quotePartySizeValue : 0;
+    const reservationPerPerson = Math.max(flightTicketPerPerson, totalPerPerson);
+
+    return {
+      baseSubtotal,
+      marginTotal,
+      subtotalWithMargin,
+      cardFee,
+      vendorCommission,
+      taxAmount,
+      totalBeforeFee,
+      feePerPax,
+      feeTotal,
+      totalFinal,
+      totalPerPerson,
+      flightTicketPerPerson,
+      reservationPerPerson,
+    };
+  }, [quoteDraft, quoteConfig, quotePartySizeValue]);
 
   const effectiveRate = Math.max(exchangeRate || 0, 500);
   const rateLabel = exchangeRate < 500 ? "(Min 500 aplicado)" : "(Rate real)";
@@ -687,132 +860,187 @@ export default function QuotesPage() {
             </Button>
           </div>
           <div className="max-h-[520px] space-y-4 overflow-y-auto pr-2">
-            {quoteDraft?.lodgingStays.map((stay, index) => (
-              <details key={stay.id} className="rounded-lg border border-slate-200">
-                <summary className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-800">
-                  <span>
-                    Estancia {index + 1} · {stay.city || "Sin ciudad"}
-                  </span>
-                  <span className="text-xs font-semibold text-slate-600">
-                    {(stay.nights ?? "-")} noches · ${((stay.nights ?? 0) * (stay.pricePerNight ?? 0)).toFixed(2)}
-                  </span>
-                </summary>
-                <div className="border-t border-slate-100 px-4 py-4">
-                  <div className="mb-3 flex items-center justify-between">
-                    <p className="text-sm font-semibold text-slate-800">Detalles</p>
-                    {quoteDraft.lodgingStays.length > 1 ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => removeLodgingStay(stay.id)}
+            {quoteDraft?.lodgingStays.map((stay, index) => {
+              const stayPax =
+                stay.priceType === "PER_PERSON"
+                  ? Number(stay.customPax ?? quotePartySizeValue)
+                  : 1;
+              const stayBase = (stay.nights ?? 0) * (stay.pricePerNight ?? 0) * stayPax;
+              const stayMarginRate = resolveLodgingMarginRate(stay.marginRate);
+              const stayTotal = stayBase * (1 + stayMarginRate);
+              return (
+                <details key={stay.id} className="rounded-lg border border-slate-200">
+                  <summary className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-800">
+                    <span>
+                      Estancia {index + 1} · {stay.city || "Sin ciudad"}
+                    </span>
+                    <span className="text-xs font-semibold text-slate-600">
+                      {(stay.nights ?? "-")} noches · ${stayTotal.toFixed(2)}
+                    </span>
+                  </summary>
+                  <div className="border-t border-slate-100 px-4 py-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-800">Detalles</p>
+                      {quoteDraft.lodgingStays.length > 1 ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => removeLodgingStay(stay.id)}
+                        >
+                          Quitar
+                        </Button>
+                      ) : null}
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Ciudad</Label>
+                      <Input
+                        value={stay.city}
+                        placeholder="Ej: Madrid"
+                        onChange={(event) =>
+                          updateLodgingStay(stay.id, { city: event.target.value })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Noches</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={stay.nights ?? ""}
+                        onChange={(event) =>
+                          updateLodgingStay(stay.id, {
+                            nights: event.target.value ? Number(event.target.value) : null,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Tipo de hospedaje</Label>
+                      <select
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                        value={stay.lodgingType}
+                        onChange={(event) =>
+                          updateLodgingStay(stay.id, { lodgingType: event.target.value })
+                        }
                       >
-                        Quitar
-                      </Button>
-                    ) : null}
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Ciudad</Label>
-                    <Input
-                      value={stay.city}
-                      placeholder="Ej: Madrid"
-                      onChange={(event) =>
-                        updateLodgingStay(stay.id, { city: event.target.value })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Noches</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={stay.nights ?? ""}
-                      onChange={(event) =>
-                        updateLodgingStay(stay.id, {
-                          nights: event.target.value ? Number(event.target.value) : null,
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Tipo de hospedaje</Label>
-                    <select
-                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                      value={stay.lodgingType}
-                      onChange={(event) =>
-                        updateLodgingStay(stay.id, { lodgingType: event.target.value })
-                      }
-                    >
-                      <option value="Hotel">Hotel</option>
-                      <option value="Airbnb">Airbnb</option>
-                      <option value="Hostel">Hostel</option>
-                      <option value="Otro">Otro</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Acomodacion</Label>
-                    <select
-                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                      value={stay.accommodation}
-                      onChange={(event) =>
-                        updateLodgingStay(stay.id, { accommodation: event.target.value })
-                      }
-                    >
-                      <option value="Matrimonial">Matrimonial</option>
-                      <option value="Individual">Individual</option>
-                      <option value="Doble">Doble</option>
-                      <option value="Triple">Triple</option>
-                      <option value="Familiar">Familiar</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Alimentacion</Label>
-                    <select
-                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                      value={stay.mealPlan}
-                      onChange={(event) =>
-                        updateLodgingStay(stay.id, { mealPlan: event.target.value })
-                      }
-                    >
-                      <option value="Desayuno incluido">Desayuno incluido</option>
-                      <option value="2 tiempos">2 tiempos</option>
-                      <option value="3 tiempos">3 tiempos</option>
-                      <option value="Todo incluido">Todo incluido</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Detalle / nombre del hospedaje</Label>
-                    <Input
-                      value={stay.detail}
-                      placeholder="Ej: Hotel Riu, Casa Colonial..."
-                      onChange={(event) =>
-                        updateLodgingStay(stay.id, { detail: event.target.value })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Precio por noche (USD)</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={stay.pricePerNight ?? ""}
-                      onChange={(event) =>
-                        updateLodgingStay(stay.id, {
-                          pricePerNight: event.target.value ? Number(event.target.value) : null,
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Total estancia</Label>
-                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                      ${((stay.nights ?? 0) * (stay.pricePerNight ?? 0)).toFixed(2)}
+                        <option value="Hotel">Hotel</option>
+                        <option value="Airbnb">Airbnb</option>
+                        <option value="Hostel">Hostel</option>
+                        <option value="Otro">Otro</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Acomodacion</Label>
+                      <select
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                        value={stay.accommodation}
+                        onChange={(event) =>
+                          updateLodgingStay(stay.id, { accommodation: event.target.value })
+                        }
+                      >
+                        <option value="Matrimonial">Matrimonial</option>
+                        <option value="Individual">Individual</option>
+                        <option value="Doble">Doble</option>
+                        <option value="Triple">Triple</option>
+                        <option value="Familiar">Familiar</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Alimentacion</Label>
+                      <select
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                        value={stay.mealPlan}
+                        onChange={(event) =>
+                          updateLodgingStay(stay.id, { mealPlan: event.target.value })
+                        }
+                      >
+                        <option value="Desayuno incluido">Desayuno incluido</option>
+                        <option value="2 tiempos">2 tiempos</option>
+                        <option value="3 tiempos">3 tiempos</option>
+                        <option value="Todo incluido">Todo incluido</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Detalle / nombre del hospedaje</Label>
+                      <Input
+                        value={stay.detail}
+                        placeholder="Ej: Hotel Riu, Casa Colonial..."
+                        onChange={(event) =>
+                          updateLodgingStay(stay.id, { detail: event.target.value })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Precio por noche (USD)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={stay.pricePerNight ?? ""}
+                        onChange={(event) =>
+                          updateLodgingStay(stay.id, {
+                            pricePerNight: event.target.value ? Number(event.target.value) : null,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Tipo de precio</Label>
+                      <select
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                        value={stay.priceType}
+                        onChange={(event) =>
+                          updateLodgingStay(stay.id, {
+                            priceType: event.target.value as QuotePriceType,
+                          })
+                        }
+                      >
+                        <option value="PER_PERSON">Por persona</option>
+                        <option value="PER_GROUP">Por grupo</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Pax (opcional)</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        placeholder={stay.priceType === "PER_PERSON" ? "Total" : "No aplica"}
+                        value={stay.customPax ?? ""}
+                        disabled={stay.priceType !== "PER_PERSON"}
+                        onChange={(event) =>
+                          updateLodgingStay(stay.id, {
+                            customPax: event.target.value ? Number(event.target.value) : null,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Margen %</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={(stay.marginRate ?? resolveLodgingMarginRate(null)) * 100}
+                        onChange={(event) =>
+                          updateLodgingStay(stay.id, {
+                            marginRate: event.target.value
+                              ? Number(event.target.value) / 100
+                              : null,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Total estancia</Label>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                        ${stayTotal.toFixed(2)}
+                      </div>
+                    </div>
                     </div>
                   </div>
-                  </div>
-                </div>
-              </details>
-            ))}
+                </details>
+              );
+            })}
           </div>
         </div>
       );
@@ -835,73 +1063,149 @@ export default function QuotesPage() {
               <tr>
                 <th className="px-3 py-2">Incluir</th>
                 <th className="px-3 py-2">Detalle</th>
+                <th className="px-3 py-2">Tipo precio</th>
+                <th className="px-3 py-2">Pax</th>
                 <th className="px-3 py-2">Cant.</th>
                 <th className="px-3 py-2">Precio USD</th>
+                <th className="px-3 py-2">Margen %</th>
+                {sectionId === "flights" ? <th className="px-3 py-2">Tipo vuelo</th> : null}
                 <th className="px-3 py-2">Total</th>
                 <th className="px-3 py-2">Accion</th>
               </tr>
             </thead>
             <tbody>
-              {section.items.map((item) => (
-                <tr key={item.id} className="border-t border-slate-100">
-                  <td className="px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={item.selected}
-                      onChange={(event) =>
-                        updateDraftItem(sectionId, item.id, { selected: event.target.checked })
-                      }
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <Input
-                      className="w-full"
-                      value={item.label}
-                      onChange={(event) =>
-                        updateDraftItem(sectionId, item.id, { label: event.target.value })
-                      }
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <Input
-                      className="w-full"
-                      type="number"
-                      min={1}
-                      value={item.quantity ?? ""}
-                      onChange={(event) =>
-                        updateDraftItem(sectionId, item.id, {
-                          quantity: event.target.value ? Number(event.target.value) : null,
-                        })
-                      }
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <Input
-                      className="w-full"
-                      type="number"
-                      min={0}
-                      value={item.unitPrice ?? ""}
-                      onChange={(event) =>
-                        updateDraftItem(sectionId, item.id, {
-                          unitPrice: event.target.value ? Number(event.target.value) : null,
-                        })
-                      }
-                    />
-                  </td>
-                  <td className="px-3 py-2 text-slate-700">
-                    ${(((item.quantity ?? 0) * (item.unitPrice ?? 0)) as number).toFixed(2)}
-                  </td>
-                  <td className="px-3 py-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => removeDraftItem(sectionId, item.id)}
-                    >
-                      Eliminar
-                    </Button>
-                  </td>
-                </tr>
-              ))}
+              {section.items.map((item) => {
+                const quantity = typeof item.quantity === "number" ? item.quantity : 0;
+                const unitPrice = typeof item.unitPrice === "number" ? item.unitPrice : 0;
+                const paxMultiplier =
+                  item.priceType === "PER_PERSON"
+                    ? Number(item.customPax ?? quotePartySizeValue)
+                    : 1;
+                const marginRate = resolveMarginRate(sectionId, item.marginRate, item.flightType);
+                const baseTotal = quantity * unitPrice * paxMultiplier;
+                const total = baseTotal * (1 + marginRate);
+                return (
+                  <tr key={item.id} className="border-t border-slate-100">
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={item.selected}
+                        onChange={(event) =>
+                          updateDraftItem(sectionId, item.id, { selected: event.target.checked })
+                        }
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input
+                        className="w-full"
+                        value={item.label}
+                        onChange={(event) =>
+                          updateDraftItem(sectionId, item.id, { label: event.target.value })
+                        }
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <select
+                        className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+                        value={item.priceType}
+                        onChange={(event) =>
+                          updateDraftItem(sectionId, item.id, {
+                            priceType: event.target.value as QuotePriceType,
+                          })
+                        }
+                      >
+                        <option value="PER_PERSON">Por persona</option>
+                        <option value="PER_GROUP">Por grupo</option>
+                      </select>
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input
+                        className="w-full"
+                        type="number"
+                        min={1}
+                        placeholder={item.priceType === "PER_PERSON" ? "Total" : "-"}
+                        value={item.customPax ?? ""}
+                        disabled={item.priceType !== "PER_PERSON"}
+                        onChange={(event) =>
+                          updateDraftItem(sectionId, item.id, {
+                            customPax: event.target.value ? Number(event.target.value) : null,
+                          })
+                        }
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input
+                        className="w-full"
+                        type="number"
+                        min={1}
+                        value={item.quantity ?? ""}
+                        onChange={(event) =>
+                          updateDraftItem(sectionId, item.id, {
+                            quantity: event.target.value ? Number(event.target.value) : null,
+                          })
+                        }
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input
+                        className="w-full"
+                        type="number"
+                        min={0}
+                        value={item.unitPrice ?? ""}
+                        onChange={(event) =>
+                          updateDraftItem(sectionId, item.id, {
+                            unitPrice: event.target.value ? Number(event.target.value) : null,
+                          })
+                        }
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input
+                        className="w-full"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={(item.marginRate ?? marginRate) * 100}
+                        onChange={(event) =>
+                          updateDraftItem(sectionId, item.id, {
+                            marginRate: event.target.value
+                              ? Number(event.target.value) / 100
+                              : null,
+                          })
+                        }
+                      />
+                    </td>
+                    {sectionId === "flights" ? (
+                      <td className="px-3 py-2">
+                        <select
+                          className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+                          value={item.flightType ?? "INTERNATIONAL"}
+                          onChange={(event) =>
+                            updateDraftItem(sectionId, item.id, {
+                              flightType: event.target.value as "INTERNATIONAL" | "DOMESTIC",
+                            })
+                          }
+                        >
+                          <option value="INTERNATIONAL">Internacional</option>
+                          <option value="DOMESTIC">Interno</option>
+                        </select>
+                      </td>
+                    ) : null}
+                    <td className="px-3 py-2 text-slate-700">
+                      ${total.toFixed(2)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => removeDraftItem(sectionId, item.id)}
+                      >
+                        Eliminar
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1087,6 +1391,7 @@ export default function QuotesPage() {
                           ) : null}
                           {lead.quoteStatus === QuoteStatus.OFFER_SENT ? (
                             <>
+                              <option value="EDIT_QUOTE">Editar cotizacion</option>
                               <option value="WIN">Marcar ganada</option>
                               <option value={QuoteStatus.PAUSED}>Pausar</option>
                               <option value={QuoteStatus.LOST}>Perder</option>
@@ -1261,17 +1566,98 @@ export default function QuotesPage() {
                       <div>
                         <p className="text-xs text-slate-500">Total USD</p>
                         <p className="text-xl font-semibold text-slate-900">
-                          ${quoteTotalUsd.toFixed(2)}
+                          ${quoteTotals.totalFinal.toFixed(2)}
                         </p>
                       </div>
                       <div>
                         <p className="text-xs text-slate-500">Total CRC</p>
                         <p className="text-xl font-semibold text-slate-900">
-                          CRC {(quoteTotalUsd * effectiveRate).toFixed(2)}
+                          CRC {(quoteTotals.totalFinal * effectiveRate).toFixed(2)}
                         </p>
                         <p className="text-xs text-slate-500">
                           TC {effectiveRate} {rateLabel}
                         </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white p-4">
+                    <p className="text-xs font-semibold uppercase text-slate-500">Desglose</p>
+                    <div className="mt-2 space-y-2 text-sm text-slate-700">
+                      <div className="flex items-center justify-between">
+                        <span>Subtotal base</span>
+                        <span className="font-semibold text-slate-900">
+                          ${quoteTotals.baseSubtotal.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Margen total</span>
+                        <span className="font-semibold text-slate-900">
+                          ${quoteTotals.marginTotal.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Subtotal con margen</span>
+                        <span className="font-semibold text-slate-900">
+                          ${quoteTotals.subtotalWithMargin.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>
+                          Tarjetas ({((quoteConfig?.cardFeeRate ?? 0) * 100).toFixed(2)}%)
+                        </span>
+                        <span className="font-semibold text-slate-900">
+                          ${quoteTotals.cardFee.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>
+                          Comision vendedor ({((quoteConfig?.vendorCommissionRate ?? 0) * 100).toFixed(2)}%)
+                        </span>
+                        <span className="font-semibold text-slate-900">
+                          ${quoteTotals.vendorCommission.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>IVA ({((quoteConfig?.taxRate ?? 0) * 100).toFixed(2)}%)</span>
+                        <span className="font-semibold text-slate-900">
+                          ${quoteTotals.taxAmount.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Total con recargos</span>
+                        <span className="font-semibold text-slate-900">
+                          ${quoteTotals.totalBeforeFee.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Fee por pax ({quoteTotals.feePerPax.toFixed(2)} x {quotePartySizeValue || 0})</span>
+                        <span className="font-semibold text-slate-900">
+                          ${quoteTotals.feeTotal.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between border-t border-slate-100 pt-2">
+                        <span className="text-slate-900">Total final</span>
+                        <span className="font-semibold text-slate-900">
+                          ${quoteTotals.totalFinal.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Total por persona</span>
+                        <span className="font-semibold text-slate-900">
+                          ${quoteTotals.totalPerPerson.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Ticket aereo por persona</span>
+                        <span className="font-semibold text-slate-900">
+                          ${quoteTotals.flightTicketPerPerson.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Reserva por persona (min)</span>
+                        <span className="font-semibold text-slate-900">
+                          ${quoteTotals.reservationPerPerson.toFixed(2)}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -1300,7 +1686,15 @@ export default function QuotesPage() {
                             <p className="text-xs text-slate-600">{stay.detail}</p>
                           ) : null}
                           <p className="mt-1 text-sm font-semibold text-slate-900">
-                            ${((stay.nights ?? 0) * (stay.pricePerNight ?? 0)).toFixed(2)}
+                            ${(() => {
+                              const stayPax =
+                                stay.priceType === "PER_PERSON"
+                                  ? Number(stay.customPax ?? quotePartySizeValue)
+                                  : 1;
+                              const stayBase = (stay.nights ?? 0) * (stay.pricePerNight ?? 0) * stayPax;
+                              const stayMarginRate = resolveLodgingMarginRate(stay.marginRate);
+                              return (stayBase * (1 + stayMarginRate)).toFixed(2);
+                            })()}
                           </p>
                         </div>
                       ))}
@@ -1348,10 +1742,24 @@ export default function QuotesPage() {
                                 <span>
                                   {item.label || "Item sin nombre"} · {item.quantity ?? 0} x ${
                                     item.unitPrice ?? 0
-                                  }
+                                  } · {item.priceType === "PER_PERSON" ? "por persona" : "por grupo"}
                                 </span>
                                 <span className="font-semibold text-slate-900">
-                                  ${(((item.quantity ?? 0) * (item.unitPrice ?? 0)) as number).toFixed(2)}
+                                  ${(() => {
+                                    const quantity = item.quantity ?? 0;
+                                    const unitPrice = item.unitPrice ?? 0;
+                                    const paxMultiplier =
+                                      item.priceType === "PER_PERSON"
+                                        ? Number(item.customPax ?? quotePartySizeValue)
+                                        : 1;
+                                    const marginRate = resolveMarginRate(
+                                      section.id,
+                                      item.marginRate,
+                                      item.flightType,
+                                    );
+                                    const baseTotal = quantity * unitPrice * paxMultiplier;
+                                    return (baseTotal * (1 + marginRate)).toFixed(2);
+                                  })()}
                                 </span>
                               </li>
                             ))}
