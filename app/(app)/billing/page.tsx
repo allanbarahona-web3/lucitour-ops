@@ -6,7 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getOpsRepo } from "@/lib/data/opsRepo";
 import { useSession } from "@/lib/auth/sessionContext";
-import { BillingStatus, QuoteStatus, type Trip, type TripMember } from "@/lib/types/ops";
+import {
+  BillingStatus,
+  QuoteStatus,
+  UpsellOrderStatus,
+  type Trip,
+  type TripMember,
+  type UpsellOrder,
+} from "@/lib/types/ops";
 
 type RowItem = {
   member: TripMember;
@@ -31,6 +38,7 @@ export default function BillingPage() {
   const repo = useMemo(() => getOpsRepo(), []);
   const { user, users } = useSession();
   const [rows, setRows] = useState<RowItem[]>([]);
+  const [upsellRows, setUpsellRows] = useState<UpsellOrder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [query, setQuery] = useState("");
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -46,10 +54,11 @@ export default function BillingPage() {
   useEffect(() => {
     const loadRows = async () => {
       setIsLoading(true);
-      const [trips, billingConfig, leads] = await Promise.all([
+      const [trips, billingConfig, leads, upsellOrders] = await Promise.all([
         repo.listTrips(),
         repo.getBillingConfig(),
         repo.listLeads(),
+        repo.listUpsellOrders(),
       ]);
       setExchangeRate(billingConfig.exchangeRate);
       setWonQuoteCount(leads.filter((lead) => lead.quoteStatus === QuoteStatus.WON).length);
@@ -73,6 +82,11 @@ export default function BillingPage() {
           (b.member.billingSentAt ?? "").localeCompare(a.member.billingSentAt ?? ""),
         );
       setRows(nextRows);
+      setUpsellRows(
+        upsellOrders
+          .filter((order) => order.status !== UpsellOrderStatus.CANCELLED)
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      );
       setIsLoading(false);
     };
 
@@ -96,6 +110,25 @@ export default function BillingPage() {
       .toLowerCase();
     return haystack.includes(q);
   });
+
+  const filteredUpsellRows = upsellRows.filter((order) => {
+    const q = query.trim().toLowerCase();
+    if (!q) {
+      return true;
+    }
+    const member = rows.find((row) => row.member.id === order.tripMemberId)?.member;
+    const haystack = `${member?.fullName ?? ""} ${member?.identification ?? ""} ${order.quoteCode ?? ""}`
+      .toLowerCase();
+    return haystack.includes(q);
+  });
+
+  const updateUpsellStatus = async (orderId: string, status: UpsellOrderStatus) => {
+    const updated = await repo.updateUpsellOrder(orderId, { status });
+    if (!updated) {
+      return;
+    }
+    setUpsellRows((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+  };
 
   const updateMemberLocal = (memberId: string, amount: number | null) => {
     setRows((prev) =>
@@ -237,6 +270,73 @@ export default function BillingPage() {
                     <td className="px-3 py-2 text-slate-600">{trip ? trip.name : "-"}</td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Anexos de adicionales</CardTitle>
+        </CardHeader>
+        <CardContent className="overflow-auto">
+          {isLoading ? (
+            <p className="text-sm text-slate-600">Cargando anexos...</p>
+          ) : filteredUpsellRows.length === 0 ? (
+            <p className="text-sm text-slate-500">Sin anexos</p>
+          ) : (
+            <table className="min-w-[1100px] w-full border-collapse text-sm">
+              <thead className="bg-slate-50 text-left text-xs text-slate-600">
+                <tr>
+                  <th className="px-3 py-2">Fecha</th>
+                  <th className="px-3 py-2">Pasajero</th>
+                  <th className="px-3 py-2">Cotizacion</th>
+                  <th className="px-3 py-2">Total USD</th>
+                  <th className="px-3 py-2">Total CRC</th>
+                  <th className="px-3 py-2">Estado</th>
+                  <th className="px-3 py-2">Lineas</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredUpsellRows.map((order) => {
+                  const member = rows.find((row) => row.member.id === order.tripMemberId)?.member;
+                  return (
+                    <tr key={order.id} className="border-t border-slate-100 align-top">
+                      <td className="px-3 py-2 text-slate-600">{formatDate(order.createdAt)}</td>
+                      <td className="px-3 py-2 text-slate-900">{member?.fullName ?? "-"}</td>
+                      <td className="px-3 py-2 text-slate-600">{order.quoteCode ?? "-"}</td>
+                      <td className="px-3 py-2 font-semibold text-slate-900">USD {order.totalAmount.toFixed(2)}</td>
+                      <td className={`px-3 py-2 text-xs font-semibold ${rateColorClass}`}>
+                        CRC {(order.totalAmount * effectiveRate).toFixed(2)} {rateLabel}
+                      </td>
+                      <td className="px-3 py-2">
+                        <select
+                          className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                          value={order.status}
+                          onChange={(event) =>
+                            void updateUpsellStatus(order.id, event.target.value as UpsellOrderStatus)
+                          }
+                        >
+                          {Object.values(UpsellOrderStatus).map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-3 py-2 text-slate-600">
+                        <div className="space-y-1">
+                          {order.lines.map((line) => (
+                            <div key={line.id} className="text-xs">
+                              {line.label} · {line.ownerName} · {line.quantity} x USD {line.unitPrice.toFixed(2)} = USD {line.totalPrice.toFixed(2)}
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

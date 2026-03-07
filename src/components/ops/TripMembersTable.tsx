@@ -19,6 +19,7 @@ import type {
   DocumentType,
   TripMember,
   UpdateTripMemberPatch,
+  UpsellType,
   User,
 } from "../../lib/types/ops";
 import {
@@ -31,6 +32,7 @@ import {
   PassportStatus,
   BillingStatus,
   Role,
+  UpsellOrderStatus,
 } from "../../lib/types/ops";
 import type { IOpsRepo } from "../../lib/data/opsRepo";
 import { TripMemberFilters, type TripMemberFilterState } from "./TripMemberFilters";
@@ -142,9 +144,6 @@ export const TripMembersTable = ({
   const [expandedInsuranceTitularByMember, setExpandedInsuranceTitularByMember] = useState<
     Record<string, boolean>
   >({});
-  const [expandedSeatsByMember, setExpandedSeatsByMember] = useState<Record<string, boolean>>({});
-  const [expandedLuggageByMember, setExpandedLuggageByMember] = useState<Record<string, boolean>>({});
-  const [expandedToursByMember, setExpandedToursByMember] = useState<Record<string, boolean>>({});
   const [modRequests, setModRequests] = useState<ContractModificationRequest[]>([]);
   const [modDialog, setModDialog] = useState<{ open: boolean; member: TripMember | null }>({
     open: false,
@@ -167,6 +166,24 @@ export const TripMembersTable = ({
   const [modStep, setModStep] = useState<ContractModificationStep>("STEP1");
   const [modDraft, setModDraft] = useState<TripMember | null>(null);
   const [isSavingModification, setIsSavingModification] = useState(false);
+  const [upsellDialog, setUpsellDialog] = useState<{ open: boolean; member: TripMember | null }>(
+    {
+      open: false,
+      member: null,
+    },
+  );
+  const [upsellLines, setUpsellLines] = useState<
+    Array<{
+      id: string;
+      type: UpsellType;
+      label: string;
+      ownerName: string;
+      quantity: number | null;
+      unitPrice: number | null;
+    }>
+  >([]);
+  const [upsellNotes, setUpsellNotes] = useState("");
+  const [isSavingUpsell, setIsSavingUpsell] = useState(false);
 
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
@@ -237,7 +254,7 @@ export const TripMembersTable = ({
       packageBasePrice: member.packageBasePrice ?? tripPackageBasePrice ?? 0,
       packageFinalPrice:
         member.packageFinalPrice ??
-        (member.packageBasePrice ?? tripPackageBasePrice ?? 0) * (member.seats || 1),
+        (member.packageBasePrice ?? tripPackageBasePrice ?? 0) * Math.max(1, (member.companions ?? []).length + 1),
       reservationMinPerPerson:
         member.reservationMinPerPerson ?? tripReservationMinPerPerson ?? 0,
       reservationFinalPerPerson:
@@ -246,6 +263,8 @@ export const TripMembersTable = ({
         tripReservationMinPerPerson ??
         0,
       paymentPlanMonths: member.paymentPlanMonths ?? null,
+      paymentBalanceTotal: member.paymentBalanceTotal ?? null,
+      paymentInstallmentAmount: member.paymentInstallmentAmount ?? null,
       accommodationType: member.accommodationType ?? "",
       seatUnitPrice: member.seatUnitPrice ?? null,
       luggageType: member.luggageType ?? "",
@@ -382,8 +401,8 @@ export const TripMembersTable = ({
     const nextDocuments = hasMinorCompanions
       ? member.documents
       : member.documents.filter((doc) => doc.type !== "MINOR_PERMIT");
-    scheduleUpdate(
-      member.id,
+    schedulePricingUpdate(
+      member,
       {
         companions: nextCompanions,
         hasCompanions: nextHasCompanions,
@@ -401,31 +420,23 @@ export const TripMembersTable = ({
 
   const calculatePackageTotals = (member: TripMember, patch: Partial<TripMember> = {}) => {
     const next = { ...member, ...patch };
-    const seats = Math.max(1, next.seats || 1);
+    const seats = Math.max(1, (next.companions ?? []).length + 1);
     const basePrice = next.packageBasePrice ?? 0;
     const baseTotal = basePrice * seats;
-    const seatUnitPrice = next.seatUnitPrice ?? 0;
-    const seatTotal = seatUnitPrice * seats;
-    const luggageQty = next.luggageQuantity ?? 0;
-    const luggageUnitPrice = next.luggageUnitPrice ?? 0;
-    const luggageTotal = luggageQty * luggageUnitPrice;
-    const toursTotal = (next.extraTours ?? []).reduce(
-      (sum, tour) => sum + (tour.quantity ?? 0) * (tour.unitPrice ?? 0),
-      0,
-    );
-    const extrasTotal = seatTotal + luggageTotal + toursTotal;
-    const total = baseTotal + extrasTotal;
     const reservationBase = next.reservationMinPerPerson ?? 0;
-    const reservationPerPerson = reservationBase + (extrasTotal / seats);
+    const reservationPerPerson = reservationBase;
+    const reservationTotal = reservationPerPerson * seats;
+    const balanceTotal = Math.max(0, baseTotal - reservationTotal);
+    const months = Math.max(0, next.paymentPlanMonths ?? 0);
+    const installmentAmount = months > 0 ? balanceTotal / months : balanceTotal;
     return {
       seats,
       baseTotal,
-      seatTotal,
-      luggageTotal,
-      toursTotal,
-      extrasTotal,
-      total,
+      total: baseTotal,
       reservationPerPerson,
+      reservationTotal,
+      balanceTotal,
+      installmentAmount,
     };
   };
 
@@ -439,20 +450,13 @@ export const TripMembersTable = ({
       member.id,
       {
         ...patch,
-        packageFinalPrice: totals.total,
+        seats: totals.seats,
+        packageFinalPrice: totals.baseTotal,
         reservationFinalPerPerson: totals.reservationPerPerson,
+        paymentBalanceTotal: totals.balanceTotal,
+        paymentInstallmentAmount: totals.installmentAmount,
       },
       key,
-    );
-  };
-
-  const updateExtraTours = (member: TripMember, nextTours: TripMember["extraTours"]) => {
-    schedulePricingUpdate(
-      member,
-      {
-        extraTours: nextTours,
-      },
-      `${member.id}:extraTours`,
     );
   };
 
@@ -619,6 +623,120 @@ export const TripMembersTable = ({
     }
   };
 
+  const openUpsellDialog = (member: TripMember) => {
+    const titularName = member.fullName?.trim() || "Titular";
+    setUpsellDialog({ open: true, member });
+    setUpsellNotes("");
+    setUpsellLines([
+      { id: `${member.id}-upsell-seat`, type: "SEAT", label: "Asientos adicionales", ownerName: titularName, quantity: null, unitPrice: null },
+      { id: `${member.id}-upsell-luggage`, type: "LUGGAGE", label: "", ownerName: titularName, quantity: null, unitPrice: null },
+      { id: `${member.id}-upsell-tour`, type: "TOUR", label: "", ownerName: titularName, quantity: null, unitPrice: null },
+      { id: `${member.id}-upsell-insurance`, type: "INSURANCE", label: "Seguros", ownerName: titularName, quantity: null, unitPrice: null },
+      { id: `${member.id}-upsell-flight`, type: "FLIGHT", label: "", ownerName: titularName, quantity: null, unitPrice: null },
+    ]);
+  };
+
+  const addUpsellLine = (type: UpsellType, label = "") => {
+    const titularName = upsellDialog.member?.fullName?.trim() || "Titular";
+    setUpsellLines((prev) => [
+      ...prev,
+      {
+        id: `upsell-${type}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        type,
+        label,
+        ownerName: titularName,
+        quantity: null,
+        unitPrice: null,
+      },
+    ]);
+  };
+
+  const removeUpsellLine = (lineId: string) => {
+    setUpsellLines((prev) => prev.filter((line) => line.id !== lineId));
+  };
+
+  const closeUpsellDialog = () => {
+    setUpsellDialog({ open: false, member: null });
+    setUpsellLines([]);
+    setUpsellNotes("");
+  };
+
+  const upsellSubtotal = upsellLines.reduce(
+    (sum, line) => sum + Math.max(0, line.quantity ?? 0) * Math.max(0, line.unitPrice ?? 0),
+    0,
+  );
+
+  const upsellOwnerOptions = useMemo(() => {
+    const titularName = upsellDialog.member?.fullName?.trim() || "Titular";
+    const companionNames = (upsellDialog.member?.companions ?? []).map(
+      (companion, idx) => companion.fullName?.trim() || `Acompanante ${idx + 1}`,
+    );
+
+    return [titularName, ...companionNames].filter(
+      (name, idx, arr) => name.length > 0 && arr.indexOf(name) === idx,
+    );
+  }, [upsellDialog.member]);
+
+  const handleSubmitUpsell = async () => {
+    if (!upsellDialog.member || isSavingUpsell) {
+      return;
+    }
+    const normalizedLines = upsellLines
+      .map((line) => ({
+        ...line,
+        ownerName: line.ownerName?.trim() || "Titular",
+        quantity: Math.max(0, line.quantity ?? 0),
+        unitPrice: Math.max(0, line.unitPrice ?? 0),
+      }))
+      .filter(
+        (line) =>
+          line.quantity > 0 &&
+          line.unitPrice > 0 &&
+          line.label.trim().length > 0 &&
+          line.ownerName.trim().length > 0,
+      );
+
+    if (normalizedLines.length === 0) {
+      return;
+    }
+
+    setIsSavingUpsell(true);
+    try {
+      const leads = await repo.listLeads();
+      const relatedLead = leads.find(
+        (lead) =>
+          lead.quoteTripMemberId === upsellDialog.member?.id ||
+          (upsellDialog.member?.quoteCode && lead.quoteCode === upsellDialog.member.quoteCode),
+      );
+      await repo.createUpsellOrder({
+        tripId,
+        tripMemberId: upsellDialog.member.id,
+        leadId: relatedLead?.id ?? null,
+        clientId: upsellDialog.member.clientId,
+        quoteCode: upsellDialog.member.quoteCode ?? null,
+        status: UpsellOrderStatus.SENT_TO_PURCHASES,
+        totalAmount: normalizedLines.reduce(
+          (sum, line) => sum + line.quantity * line.unitPrice,
+          0,
+        ),
+        notes: upsellNotes,
+        lines: normalizedLines.map((line) => ({
+          id: line.id,
+          type: line.type,
+          label: line.label,
+          ownerName: line.ownerName,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+          totalPrice: line.quantity * line.unitPrice,
+        })),
+        createdByUserId: currentUser.id,
+      });
+      closeUpsellDialog();
+    } finally {
+      setIsSavingUpsell(false);
+    }
+  };
+
   const updateModification = async (
     requestId: string,
     patch: UpdateContractModificationPatch,
@@ -673,6 +791,9 @@ export const TripMembersTable = ({
     isFilled(person.emergencyContactName) &&
     isFilled(person.emergencyContactPhone) &&
     isFilled(person.specialSituations);
+
+const requiresMinorPermit = (member: TripMember) =>
+  member.hasMinorCompanions && member.hasParentalAuthority === false;
 
   const getOwnerValue = (memberId: string, type: DocumentType) =>
     docOwners[memberId]?.[type] ?? "Titular";
@@ -804,6 +925,7 @@ export const TripMembersTable = ({
     ];
     const step2Checks = [
       { label: "Acompanantes", ok: member.hasCompanions !== null },
+      { label: "Acomodacion", ok: isFilled(member.accommodationType) },
       {
         label: "Lista de acompanantes",
         ok: member.hasCompanions !== true || member.companions.length > 0,
@@ -839,34 +961,13 @@ export const TripMembersTable = ({
       },
     ];
     const step4Checks = [
-      { label: "Acomodacion", ok: isFilled(member.accommodationType) },
-      { label: "Asientos", ok: (member.seats || 0) > 0 },
-      { label: "Precio por asiento", ok: (member.seatUnitPrice ?? 0) >= 0 },
-      {
-        label: "Equipaje",
-        ok:
-          (member.luggageQuantity ?? 0) === 0 ||
-          (isFilled(member.luggageType) && (member.luggageUnitPrice ?? 0) >= 0),
-      },
       { label: "Precio paquete", ok: (member.packageBasePrice ?? 0) >= 0 },
       { label: "Reserva minima", ok: (member.reservationMinPerPerson ?? 0) >= 0 },
       { label: "Plazo cuotas", ok: (member.paymentPlanMonths ?? 0) > 0 },
-      {
-        label: "Tours extras",
-        ok: (member.extraTours ?? []).every(
-          (tour) => isFilled(tour.label) && (tour.quantity ?? 0) > 0 && (tour.unitPrice ?? 0) >= 0,
-        ),
-      },
     ];
     const step5Required = [
       { key: "idCard", label: "Documento: Cedula", enabled: true, type: "ID_CARD" as DocumentType },
       { key: "passport", label: "Documento: Pasaporte", enabled: true, type: "PASSPORT" as DocumentType },
-      {
-        key: "minorPermit",
-        label: "Documento: Permiso menor",
-        enabled: member.hasMinorCompanions && member.hasParentalAuthority === false,
-        type: "MINOR_PERMIT" as DocumentType,
-      },
       {
         key: "insurance",
         label: "Documento: Seguro propio",
@@ -1029,15 +1130,6 @@ export const TripMembersTable = ({
                   const step5Locked = isBlockLocked(member.id, "step5");
                   const lockedClass = "pointer-events-none opacity-60";
                   const pricing = calculatePackageTotals(member);
-                  const hasSeatData = (member.seatUnitPrice ?? 0) > 0;
-                  const hasLuggageData =
-                    (member.luggageQuantity ?? 0) > 0 ||
-                    (member.luggageUnitPrice ?? 0) > 0 ||
-                    Boolean(member.luggageType);
-                  const showSeats = expandedSeatsByMember[member.id] ?? hasSeatData;
-                  const showLuggage = expandedLuggageByMember[member.id] ?? hasLuggageData;
-                  const hasTourData = (member.extraTours ?? []).length > 0;
-                  const showTours = expandedToursByMember[member.id] ?? hasTourData;
 
                   return (
                     <Fragment key={member.id}>
@@ -1292,7 +1384,7 @@ export const TripMembersTable = ({
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                               <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] text-white">2</span>
-                              <span className="text-cyan-700">Paso 2 · Acompanantes</span>
+                              <span className="text-cyan-700">Paso 2 · Acompanantes y acomodacion</span>
                             </div>
                             {step2Locked ? (
                               <Button
@@ -1755,6 +1847,31 @@ export const TripMembersTable = ({
                                 </div>
                               </div>
                             ) : null}
+
+                            <div className="grid gap-3 md:grid-cols-3">
+                              <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-600">Acomodacion</div>
+                                <select
+                                  className={selectClassName}
+                                  value={member.accommodationType}
+                                  disabled={step2Locked}
+                                  onChange={(event) =>
+                                    scheduleUpdate(
+                                      member.id,
+                                      { accommodationType: event.target.value as TripMember["accommodationType"] },
+                                      `${member.id}:accommodationType`,
+                                    )
+                                  }
+                                >
+                                  <option value="">Selecciona</option>
+                                  <option value="TWIN">Twin</option>
+                                  <option value="INDIVIDUAL">Individual</option>
+                                  <option value="MATRIMONIAL">Matrimonial</option>
+                                  <option value="TRIPLE">Triple</option>
+                                  <option value="CUADRUPLE">Cuadruple</option>
+                                </select>
+                              </div>
+                            </div>
                           </div>
                         </div>
 
@@ -2178,7 +2295,7 @@ export const TripMembersTable = ({
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                               <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] text-white">4</span>
-                              <span className="text-sky-700">Paso 4 · Adicionales</span>
+                              <span className="text-sky-700">Paso 4 · Datos numericos</span>
                             </div>
                             {step4Locked ? (
                               <Button
@@ -2209,380 +2326,27 @@ export const TripMembersTable = ({
                             />
                           </div>
                           <div className={`mt-3 space-y-4 ${step4Locked ? lockedClass : ""}`}>
-                            <div className="grid gap-3 md:grid-cols-3">
+                            <div className="grid gap-3 md:grid-cols-1">
                               <div className="space-y-1">
-                                <div className="text-xs font-semibold text-slate-600">Acomodacion</div>
-                                <select
-                                  className={selectClassName}
-                                  value={member.accommodationType}
+                                <div className="text-xs font-semibold text-slate-600">Plazo para cuotas (meses)</div>
+                                <input
+                                  className={inputClassName}
+                                  type="number"
+                                  min={1}
+                                  value={member.paymentPlanMonths === 0 ? "" : member.paymentPlanMonths ?? ""}
                                   disabled={step4Locked}
                                   onChange={(event) =>
-                                    scheduleUpdate(
-                                      member.id,
-                                      { accommodationType: event.target.value as TripMember["accommodationType"] },
-                                      `${member.id}:accommodationType`,
+                                    schedulePricingUpdate(
+                                      member,
+                                      {
+                                        paymentPlanMonths:
+                                          event.target.value === "" ? null : Number(event.target.value),
+                                      },
+                                      `${member.id}:paymentPlanMonths`,
                                     )
                                   }
-                                >
-                                  <option value="">Selecciona</option>
-                                  <option value="TWIN">Twin</option>
-                                  <option value="INDIVIDUAL">Individual</option>
-                                  <option value="MATRIMONIAL">Matrimonial</option>
-                                  <option value="TRIPLE">Triple</option>
-                                  <option value="CUADRUPLE">Cuadruple</option>
-                                </select>
+                                />
                               </div>
-                            </div>
-
-                            <div className="rounded-md border border-slate-200 bg-white p-3">
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="text-xs font-semibold text-slate-600">Asientos</div>
-                                {showSeats ? (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => {
-                                      setExpandedSeatsByMember((prev) => ({
-                                        ...prev,
-                                        [member.id]: false,
-                                      }));
-                                      schedulePricingUpdate(
-                                        member,
-                                        { seatUnitPrice: null },
-                                        `${member.id}:seats:clear`,
-                                      );
-                                    }}
-                                  >
-                                    Quitar asientos
-                                  </Button>
-                                ) : !step4Locked ? (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => {
-                                      setExpandedSeatsByMember((prev) => ({
-                                        ...prev,
-                                        [member.id]: true,
-                                      }));
-                                      if ((member.seatUnitPrice ?? 0) === 0) {
-                                        schedulePricingUpdate(
-                                          member,
-                                          { seatUnitPrice: null },
-                                          `${member.id}:seats:init`,
-                                        );
-                                      }
-                                    }}
-                                  >
-                                    Agregar asientos
-                                  </Button>
-                                ) : null}
-                              </div>
-                              {showSeats ? (
-                                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                                  <div className="space-y-1">
-                                    <div className="text-xs font-semibold text-slate-600">Cantidad de asientos</div>
-                                    <input
-                                      className={inputClassName}
-                                      type="number"
-                                      min={1}
-                                      value={member.seats}
-                                      disabled={step4Locked}
-                                      onChange={(event) =>
-                                        schedulePricingUpdate(
-                                          member,
-                                          { seats: Number(event.target.value || 1) },
-                                          `${member.id}:seats`,
-                                        )
-                                      }
-                                    />
-                                  </div>
-                                  <div className="space-y-1">
-                                    <div className="text-xs font-semibold text-slate-600">Precio por asiento</div>
-                                    <input
-                                      className={inputClassName}
-                                      type="number"
-                                      min={0}
-                                      step="0.01"
-                                      value={
-                                        member.seatUnitPrice === 0
-                                          ? ""
-                                          : member.seatUnitPrice ?? ""
-                                      }
-                                      disabled={step4Locked}
-                                      onChange={(event) =>
-                                        schedulePricingUpdate(
-                                          member,
-                                          {
-                                            seatUnitPrice:
-                                              event.target.value === "" ? null : Number(event.target.value),
-                                          },
-                                          `${member.id}:seatUnitPrice`,
-                                        )
-                                      }
-                                    />
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-
-                            <div className="rounded-md border border-slate-200 bg-white p-3">
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="text-xs font-semibold text-slate-600">Equipaje</div>
-                                {showLuggage ? (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => {
-                                      setExpandedLuggageByMember((prev) => ({
-                                        ...prev,
-                                        [member.id]: false,
-                                      }));
-                                      schedulePricingUpdate(
-                                        member,
-                                        {
-                                          luggageType: "",
-                                          luggageQuantity: null,
-                                          luggageUnitPrice: null,
-                                        },
-                                        `${member.id}:luggage:clear`,
-                                      );
-                                    }}
-                                  >
-                                    Quitar equipaje
-                                  </Button>
-                                ) : !step4Locked ? (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => {
-                                      setExpandedLuggageByMember((prev) => ({
-                                        ...prev,
-                                        [member.id]: true,
-                                      }));
-                                      if (
-                                        (member.luggageQuantity ?? 0) === 0 &&
-                                        (member.luggageUnitPrice ?? 0) === 0 &&
-                                        !member.luggageType
-                                      ) {
-                                        schedulePricingUpdate(
-                                          member,
-                                          {
-                                            luggageType: "",
-                                            luggageQuantity: null,
-                                            luggageUnitPrice: null,
-                                          },
-                                          `${member.id}:luggage:init`,
-                                        );
-                                      }
-                                    }}
-                                  >
-                                    Agregar equipaje
-                                  </Button>
-                                ) : null}
-                              </div>
-                              {showLuggage ? (
-                                <div className="mt-3 grid gap-3 md:grid-cols-3">
-                                  <div className="space-y-1">
-                                    <div className="text-xs font-semibold text-slate-600">Tipo de equipaje</div>
-                                    <select
-                                      className={selectClassName}
-                                      value={member.luggageType}
-                                      disabled={step4Locked}
-                                      onChange={(event) =>
-                                        scheduleUpdate(
-                                          member.id,
-                                          { luggageType: event.target.value as TripMember["luggageType"] },
-                                          `${member.id}:luggageType`,
-                                        )
-                                      }
-                                    >
-                                      <option value="">Sin seleccionar</option>
-                                      <option value="CARRY_ON">Carrion</option>
-                                      <option value="CHECKED">Documentado</option>
-                                    </select>
-                                  </div>
-                                  <div className="space-y-1">
-                                    <div className="text-xs font-semibold text-slate-600">Cantidad</div>
-                                    <input
-                                      className={inputClassName}
-                                      type="number"
-                                      min={0}
-                                      value={
-                                        member.luggageQuantity === 0
-                                          ? ""
-                                          : member.luggageQuantity ?? ""
-                                      }
-                                      disabled={step4Locked}
-                                      onChange={(event) =>
-                                        schedulePricingUpdate(
-                                          member,
-                                          {
-                                            luggageQuantity:
-                                              event.target.value === "" ? null : Number(event.target.value),
-                                          },
-                                          `${member.id}:luggageQuantity`,
-                                        )
-                                      }
-                                    />
-                                  </div>
-                                  <div className="space-y-1">
-                                    <div className="text-xs font-semibold text-slate-600">Precio unitario</div>
-                                    <input
-                                      className={inputClassName}
-                                      type="number"
-                                      min={0}
-                                      step="0.01"
-                                      value={
-                                        member.luggageUnitPrice === 0
-                                          ? ""
-                                          : member.luggageUnitPrice ?? ""
-                                      }
-                                      disabled={step4Locked}
-                                      onChange={(event) =>
-                                        schedulePricingUpdate(
-                                          member,
-                                          {
-                                            luggageUnitPrice:
-                                              event.target.value === "" ? null : Number(event.target.value),
-                                          },
-                                          `${member.id}:luggageUnitPrice`,
-                                        )
-                                      }
-                                    />
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-
-                            <div className="rounded-md border border-slate-200 bg-white p-3">
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="text-xs font-semibold text-slate-600">Tours extra</div>
-                                {showTours ? (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => {
-                                      setExpandedToursByMember((prev) => ({
-                                        ...prev,
-                                        [member.id]: false,
-                                      }));
-                                      updateExtraTours(member, []);
-                                    }}
-                                  >
-                                    Quitar tours
-                                  </Button>
-                                ) : !step4Locked ? (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => {
-                                      setExpandedToursByMember((prev) => ({
-                                        ...prev,
-                                        [member.id]: true,
-                                      }));
-                                      if ((member.extraTours ?? []).length === 0) {
-                                        updateExtraTours(member, []);
-                                      }
-                                    }}
-                                  >
-                                    Agregar tours
-                                  </Button>
-                                ) : null}
-                              </div>
-                              {showTours ? (
-                                <div className="mt-3 space-y-2">
-                                  <div className="grid gap-2 text-[11px] text-slate-500 md:grid-cols-[2fr_1fr_1fr_auto]">
-                                    <div>Detalle del tour</div>
-                                    <div>Cantidad</div>
-                                    <div>Precio unitario</div>
-                                    <div />
-                                  </div>
-                                  {(member.extraTours ?? []).map((tour, index) => (
-                                    <div
-                                      key={tour.id}
-                                      className="grid gap-2 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-[2fr_1fr_1fr_auto]"
-                                    >
-                                      <input
-                                        className={inputClassName}
-                                        placeholder="Detalle del tour"
-                                        value={tour.label}
-                                        disabled={step4Locked}
-                                        onChange={(event) => {
-                                          const next = [...(member.extraTours ?? [])];
-                                          next[index] = { ...tour, label: event.target.value };
-                                          updateExtraTours(member, next);
-                                        }}
-                                      />
-                                      <input
-                                        className={inputClassName}
-                                        type="number"
-                                        min={1}
-                                        placeholder="Cantidad"
-                                        value={tour.quantity === 0 ? "" : tour.quantity ?? ""}
-                                        disabled={step4Locked}
-                                        onChange={(event) => {
-                                          const next = [...(member.extraTours ?? [])];
-                                          next[index] = {
-                                            ...tour,
-                                            quantity:
-                                              event.target.value === "" ? null : Number(event.target.value),
-                                          };
-                                          updateExtraTours(member, next);
-                                        }}
-                                      />
-                                      <input
-                                        className={inputClassName}
-                                        type="number"
-                                        min={0}
-                                        step="0.01"
-                                        placeholder="Precio"
-                                        value={tour.unitPrice === 0 ? "" : tour.unitPrice ?? ""}
-                                        disabled={step4Locked}
-                                        onChange={(event) => {
-                                          const next = [...(member.extraTours ?? [])];
-                                          next[index] = {
-                                            ...tour,
-                                            unitPrice:
-                                              event.target.value === "" ? null : Number(event.target.value),
-                                          };
-                                          updateExtraTours(member, next);
-                                        }}
-                                      />
-                                      {!step4Locked ? (
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          onClick={() => {
-                                            const next = (member.extraTours ?? []).filter((_, i) => i !== index);
-                                            updateExtraTours(member, next);
-                                          }}
-                                        >
-                                          Quitar
-                                        </Button>
-                                      ) : null}
-                                    </div>
-                                  ))}
-                                  {!step4Locked ? (
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() =>
-                                        updateExtraTours(member, [
-                                          ...(member.extraTours ?? []),
-                                          {
-                                            id: `${member.id}-tour-${Date.now()}`,
-                                            label: "",
-                                            quantity: null,
-                                            unitPrice: null,
-                                          },
-                                        ])
-                                      }
-                                    >
-                                      Agregar tour
-                                    </Button>
-                                  ) : null}
-                                </div>
-                              ) : null}
                             </div>
 
                             <div className="grid gap-3 md:grid-cols-3">
@@ -2633,33 +2397,19 @@ export const TripMembersTable = ({
                                 />
                               </div>
                               <div className="space-y-1">
-                                <div className="text-xs font-semibold text-slate-600">Plazo para cuotas (meses)</div>
-                                <input
-                                  className={inputClassName}
-                                  type="number"
-                                  min={1}
-                                  value={member.paymentPlanMonths === 0 ? "" : member.paymentPlanMonths ?? ""}
-                                  disabled={step4Locked}
-                                  onChange={(event) =>
-                                    scheduleUpdate(
-                                      member.id,
-                                      {
-                                        paymentPlanMonths:
-                                          event.target.value === "" ? null : Number(event.target.value),
-                                      },
-                                      `${member.id}:paymentPlanMonths`,
-                                    )
-                                  }
-                                />
+                                <div className="text-xs font-semibold text-slate-600">Saldo total (USD)</div>
+                                <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700">
+                                  USD {pricing.balanceTotal.toFixed(2)}
+                                </div>
                               </div>
                             </div>
 
                             <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                              <div className="grid gap-2 md:grid-cols-3">
+                              <div className="grid gap-2 md:grid-cols-4">
                                 <div>
                                   <div className="text-[11px]">Total paquete</div>
                                   <div className="text-sm font-semibold text-slate-900">
-                                    USD {pricing.total.toFixed(2)}
+                                    USD {pricing.baseTotal.toFixed(2)}
                                   </div>
                                 </div>
                                 <div>
@@ -2671,11 +2421,20 @@ export const TripMembersTable = ({
                                 <div>
                                   <div className="text-[11px]">Reserva total</div>
                                   <div className="text-sm font-semibold text-slate-900">
-                                    USD {(pricing.reservationPerPerson * pricing.seats).toFixed(2)}
+                                    USD {pricing.reservationTotal.toFixed(2)}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px]">Cuota mensual sobre saldo</div>
+                                  <div className="text-sm font-semibold text-slate-900">
+                                    USD {pricing.installmentAmount.toFixed(2)}
                                   </div>
                                 </div>
                               </div>
                             </div>
+                            <p className="text-[11px] text-slate-500">
+                              Los adicionales (upsells) no se suman al paquete ni al saldo y se gestionan como anexo independiente en enviados.
+                            </p>
                           </div>
                         </div>
 
@@ -2719,12 +2478,6 @@ export const TripMembersTable = ({
                                 [
                                   { key: "idCard", label: "Cedula", type: "ID_CARD" as DocumentType, enabled: true },
                                   { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType, enabled: true },
-                                  {
-                                    key: "minorPermit",
-                                    label: "Permiso menor",
-                                    type: "MINOR_PERMIT" as DocumentType,
-                                    enabled: member.hasMinorCompanions && member.hasParentalAuthority === false,
-                                  },
                                   {
                                     key: "insurance",
                                     label: "Seguro propio",
@@ -2784,7 +2537,6 @@ export const TripMembersTable = ({
                               [
                                 { key: "idCard", label: "Cedula", type: "ID_CARD" as DocumentType },
                                 { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType },
-                                { key: "minorPermit", label: "Permiso menor", type: "MINOR_PERMIT" as DocumentType },
                                 { key: "insurance", label: "Seguro propio", type: "INSURANCE" as DocumentType },
                                 { key: "paymentProof", label: "Pagos", type: "PAYMENT_PROOF" as DocumentType },
                               ]
@@ -3047,6 +2799,13 @@ export const TripMembersTable = ({
                           >
                             Solicitar modificacion
                           </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openUpsellDialog(member)}
+                          >
+                            Adicionales
+                          </Button>
                           {canManageClients && member.clientId ? (
                             <Button
                               size="sm"
@@ -3166,6 +2925,7 @@ export const TripMembersTable = ({
             <th className="px-3 py-2">Nacionalidad</th>
             <th className="px-3 py-2">Contrato</th>
             <th className="px-3 py-2">Docs</th>
+            <th className="px-3 py-2">Permiso menor</th>
             <th className="px-3 py-2">Pasaporte</th>
             <th className="px-3 py-2">Itinerario</th>
             <th className="px-3 py-2">Ingresado por</th>
@@ -3416,6 +3176,89 @@ export const TripMembersTable = ({
                       </option>
                     ))}
                   </select>
+                </td>
+                <td className="px-3 py-2">
+                  {requiresMinorPermit(member) ? (
+                    <div className="space-y-2">
+                      <div
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                          getDocsByType(member, "MINOR_PERMIT").length > 0
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-amber-100 text-amber-700"
+                        }`}
+                      >
+                        {getDocsByType(member, "MINOR_PERMIT").length > 0
+                          ? `Cargado (${getDocsByType(member, "MINOR_PERMIT").length})`
+                          : "Pendiente"}
+                      </div>
+                      <input
+                        className={inputClassName}
+                        type="file"
+                        multiple
+                        onChange={(event) => {
+                          const nextDocs = addDocuments(
+                            member,
+                            "MINOR_PERMIT",
+                            "Acompanante menor",
+                            event.target.files,
+                          );
+                          if (nextDocs.length !== member.documents.length) {
+                            scheduleUpdate(
+                              member.id,
+                              {
+                                documents: nextDocs,
+                                docFlags: {
+                                  ...member.docFlags,
+                                  minorPermit: getDocsByType(
+                                    { ...member, documents: nextDocs },
+                                    "MINOR_PERMIT",
+                                  ).length > 0,
+                                },
+                              },
+                              `${member.id}:documents:minorPermit`,
+                            );
+                          }
+                        }}
+                      />
+                      {getDocsByType(member, "MINOR_PERMIT").length > 0 ? (
+                        <div className="flex flex-wrap gap-1 text-[11px] text-slate-600">
+                          {getDocsByType(member, "MINOR_PERMIT").map((doc) => (
+                            <span
+                              key={doc.id}
+                              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5"
+                            >
+                              {doc.fileName}
+                              <button
+                                type="button"
+                                className="text-slate-500 hover:text-slate-900"
+                                onClick={() => {
+                                  const nextDocs = removeDocument(member, doc.id);
+                                  scheduleUpdate(
+                                    member.id,
+                                    {
+                                      documents: nextDocs,
+                                      docFlags: {
+                                        ...member.docFlags,
+                                        minorPermit: getDocsByType(
+                                          { ...member, documents: nextDocs },
+                                          "MINOR_PERMIT",
+                                        ).length > 0,
+                                      },
+                                    },
+                                    `${member.id}:documents:minorPermit:remove:${doc.id}`,
+                                  );
+                                }}
+                              >
+                                x
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <span className="text-slate-400">No aplica</span>
+                  )}
                 </td>
                 <td className="px-3 py-2">
                   <select
@@ -4274,12 +4117,6 @@ export const TripMembersTable = ({
                 enabled: true,
               },
               {
-                key: "minorPermit",
-                label: "Permiso menor",
-                type: "MINOR_PERMIT" as DocumentType,
-                enabled: draft.hasMinorCompanions && draft.hasParentalAuthority === false,
-              },
-              {
                 key: "insurance",
                 label: "Seguro propio",
                 type: "INSURANCE" as DocumentType,
@@ -4329,7 +4166,6 @@ export const TripMembersTable = ({
             { key: "idCard", label: "Cedula", type: "ID_CARD" as DocumentType },
             { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType },
             { key: "paymentProof", label: "Pagos", type: "PAYMENT_PROOF" as DocumentType },
-            { key: "minorPermit", label: "Permiso menor", type: "MINOR_PERMIT" as DocumentType },
             { key: "insurance", label: "Seguro propio", type: "INSURANCE" as DocumentType },
           ]
         ).map((item) => {
@@ -4548,6 +4384,213 @@ export const TripMembersTable = ({
 
       {isAgent ? (
         <Dialog
+          open={upsellDialog.open}
+          onOpenChange={(open) => {
+            if (!open) {
+              closeUpsellDialog();
+            }
+          }}
+        >
+          <DialogContent className="max-w-6xl">
+            <DialogHeader>
+              <DialogTitle>Anexo de adicionales</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="text-xs text-slate-600">
+                Pasajero: <span className="font-semibold text-slate-900">{upsellDialog.member?.fullName ?? "-"}</span>
+              </div>
+              <div className="rounded-md border border-slate-200">
+                <table className="w-full border-collapse text-xs">
+                  <thead className="bg-slate-50 text-left text-slate-600">
+                    <tr>
+                      <th className="px-3 py-2">Tipo</th>
+                      <th className="px-3 py-2">Detalle</th>
+                      <th className="px-3 py-2">Corresponde a</th>
+                      <th className="px-3 py-2">Cantidad</th>
+                      <th className="px-3 py-2">Unitario</th>
+                      <th className="px-3 py-2">Total</th>
+                      <th className="px-3 py-2">Accion</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {upsellLines.map((line, index) => {
+                      const lineTotal = Math.max(0, line.quantity ?? 0) * Math.max(0, line.unitPrice ?? 0);
+                      return (
+                        <tr key={line.id} className="border-t border-slate-100">
+                          <td className="px-3 py-2 text-slate-600">{line.type}</td>
+                          <td className="px-3 py-2">
+                            {line.type === "LUGGAGE" ? (
+                              <select
+                                className={selectClassName}
+                                value={line.label}
+                                onChange={(event) =>
+                                  setUpsellLines((prev) =>
+                                    prev.map((item, idx) =>
+                                      idx === index ? { ...item, label: event.target.value } : item,
+                                    ),
+                                  )
+                                }
+                              >
+                                <option value="">Selecciona</option>
+                                <option value="Carry On">Carry On</option>
+                                <option value="Documentado">Documentado</option>
+                              </select>
+                            ) : line.type === "FLIGHT" ? (
+                              <select
+                                className={selectClassName}
+                                value={line.label}
+                                onChange={(event) =>
+                                  setUpsellLines((prev) =>
+                                    prev.map((item, idx) =>
+                                      idx === index ? { ...item, label: event.target.value } : item,
+                                    ),
+                                  )
+                                }
+                              >
+                                <option value="">Selecciona</option>
+                                <option value="Vuelos internos">Vuelos internos</option>
+                                <option value="Vuelos internacionales">Vuelos internacionales</option>
+                              </select>
+                            ) : (
+                              <input
+                                className={inputClassName}
+                                value={line.label}
+                                onChange={(event) =>
+                                  setUpsellLines((prev) =>
+                                    prev.map((item, idx) =>
+                                      idx === index ? { ...item, label: event.target.value } : item,
+                                    ),
+                                  )
+                                }
+                              />
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            <select
+                              className={selectClassName}
+                              value={line.ownerName}
+                              onChange={(event) =>
+                                setUpsellLines((prev) =>
+                                  prev.map((item, idx) =>
+                                    idx === index ? { ...item, ownerName: event.target.value } : item,
+                                  ),
+                                )
+                              }
+                            >
+                              {upsellOwnerOptions.map((name) => (
+                                <option key={name} value={name}>
+                                  {name}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              className={inputClassName}
+                              type="number"
+                              min={0}
+                              value={line.quantity ?? ""}
+                              onChange={(event) =>
+                                setUpsellLines((prev) =>
+                                  prev.map((item, idx) =>
+                                    idx === index
+                                      ? {
+                                          ...item,
+                                          quantity: event.target.value === "" ? null : Number(event.target.value),
+                                        }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              className={inputClassName}
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={line.unitPrice ?? ""}
+                              onChange={(event) =>
+                                setUpsellLines((prev) =>
+                                  prev.map((item, idx) =>
+                                    idx === index
+                                      ? {
+                                          ...item,
+                                          unitPrice: event.target.value === "" ? null : Number(event.target.value),
+                                        }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td className="px-3 py-2 font-semibold text-slate-900">USD {lineTotal.toFixed(2)}</td>
+                          <td className="px-3 py-2">
+                            <Button size="sm" variant="outline" onClick={() => removeUpsellLine(line.id)}>
+                              Quitar
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div className="flex flex-wrap gap-2 border-t border-slate-200 px-3 py-2">
+                  <Button size="sm" variant="outline" onClick={() => addUpsellLine("SEAT", "Asientos adicionales")}>
+                    Agregar asiento
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => addUpsellLine("LUGGAGE", "")}>
+                    Agregar equipaje
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => addUpsellLine("INSURANCE", "Seguros")}>
+                    Agregar seguro
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => addUpsellLine("TOUR", "")}>
+                    Agregar tour
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => addUpsellLine("FLIGHT", "")}>
+                    Agregar vuelo
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => addUpsellLine("OTHER", "")}>
+                    Agregar otro
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <div className="text-xs font-semibold text-slate-600">Notas</div>
+                  <textarea
+                    className="min-h-[74px] w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900"
+                    value={upsellNotes}
+                    onChange={(event) => setUpsellNotes(event.target.value)}
+                  />
+                </div>
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-xs text-slate-600">Total anexo</div>
+                  <div className="text-lg font-semibold text-slate-900">USD {upsellSubtotal.toFixed(2)}</div>
+                  <div className="mt-2 text-[11px] text-slate-500">
+                    Este monto es independiente del paquete, reserva y saldo.
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={closeUpsellDialog}>
+                  Cancelar
+                </Button>
+                <Button onClick={() => void handleSubmitUpsell()} disabled={isSavingUpsell || upsellSubtotal <= 0}>
+                  {isSavingUpsell ? "Enviando..." : "Enviar a compras"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+
+      {isAgent ? (
+        <Dialog
           open={sentSummaryDialog.open}
           onOpenChange={(open) => {
             if (!open) {
@@ -4747,7 +4790,7 @@ export const TripMembersTable = ({
 
                 {sentSummaryStep === "STEP4" ? (
                   <div className="rounded-md border border-slate-200 bg-white p-3">
-                    <div className="text-xs font-semibold text-slate-600">Paso 4 · Adicionales</div>
+                    <div className="text-xs font-semibold text-slate-600">Paso 4 · Pago base y acomodo</div>
                     <div className="mt-2 grid gap-2 md:grid-cols-2">
                       <div>
                         <div className="text-[11px] text-slate-500">Acomodacion</div>
@@ -4757,34 +4800,6 @@ export const TripMembersTable = ({
                         <div className="text-[11px] text-slate-500">Asientos</div>
                         <div>{summaryMember.seats || "-"}</div>
                       </div>
-                      <div>
-                        <div className="text-[11px] text-slate-500">Precio por asiento</div>
-                        <div>USD {(summaryMember.seatUnitPrice ?? 0).toFixed(2)}</div>
-                      </div>
-                      <div>
-                        <div className="text-[11px] text-slate-500">Equipaje</div>
-                        <div>
-                          {summaryMember.luggageType || "-"} · {summaryMember.luggageQuantity ?? 0} x USD {(
-                            summaryMember.luggageUnitPrice ?? 0
-                          ).toFixed(2)}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      <div className="text-[11px] text-slate-500">Tours extra</div>
-                      {summaryMember.extraTours.length === 0 ? (
-                        <div>-</div>
-                      ) : (
-                        <div className="space-y-1">
-                          {summaryMember.extraTours.map((tour) => (
-                            <div key={tour.id} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
-                              {tour.label || "(Sin detalle)"} · {tour.quantity ?? 0} x USD {(
-                                tour.unitPrice ?? 0
-                              ).toFixed(2)}
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
                     <div className="mt-3 grid gap-2 md:grid-cols-3">
                       <div>
@@ -4799,14 +4814,18 @@ export const TripMembersTable = ({
                         <div className="text-[11px] text-slate-500">Plazo cuotas</div>
                         <div>{summaryMember.paymentPlanMonths ?? "-"} meses</div>
                       </div>
+                      <div>
+                        <div className="text-[11px] text-slate-500">Saldo total</div>
+                        <div>USD {(summaryMember.paymentBalanceTotal ?? 0).toFixed(2)}</div>
+                      </div>
                     </div>
                     {summaryPricing ? (
                       <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-2 py-2">
-                        <div className="grid gap-2 md:grid-cols-3">
+                        <div className="grid gap-2 md:grid-cols-4">
                           <div>
                             <div className="text-[11px] text-slate-500">Total paquete</div>
                             <div className="font-semibold text-slate-900">
-                              USD {summaryPricing.total.toFixed(2)}
+                              USD {summaryPricing.baseTotal.toFixed(2)}
                             </div>
                           </div>
                           <div>
@@ -4818,12 +4837,21 @@ export const TripMembersTable = ({
                           <div>
                             <div className="text-[11px] text-slate-500">Reserva total</div>
                             <div className="font-semibold text-slate-900">
-                              USD {(summaryPricing.reservationPerPerson * summaryPricing.seats).toFixed(2)}
+                              USD {summaryPricing.reservationTotal.toFixed(2)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] text-slate-500">Cuota mensual saldo</div>
+                            <div className="font-semibold text-slate-900">
+                              USD {summaryPricing.installmentAmount.toFixed(2)}
                             </div>
                           </div>
                         </div>
                       </div>
                     ) : null}
+                    <div className="mt-3 text-[11px] text-slate-500">
+                      Los upsells se gestionan por separado como anexo enviado a Compras y Facturacion.
+                    </div>
                   </div>
                 ) : null}
 

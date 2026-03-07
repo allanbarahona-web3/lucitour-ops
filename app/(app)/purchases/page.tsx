@@ -1,7 +1,10 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getOpsRepo } from "@/lib/data/opsRepo";
+import { UpsellOrderStatus } from "@/lib/types/ops";
 
 const cards = [
   {
@@ -27,6 +30,24 @@ const cards = [
 ];
 
 export default function PurchasesDashboardPage() {
+  const repo = useMemo(() => getOpsRepo(), []);
+  const [upsellPendingCount, setUpsellPendingCount] = useState(0);
+
+  useEffect(() => {
+    const loadCounts = async () => {
+      const orders = await repo.listUpsellOrders();
+      const pendingCount = orders.filter(
+        (order) =>
+          order.status === UpsellOrderStatus.SENT_TO_PURCHASES ||
+          order.status === UpsellOrderStatus.IN_PROGRESS,
+      ).length;
+      setUpsellPendingCount(pendingCount);
+    };
+    void loadCounts();
+    const interval = setInterval(loadCounts, 15000);
+    return () => clearInterval(interval);
+  }, [repo]);
+
   return (
     <div className="space-y-6">
       <div>
@@ -44,7 +65,9 @@ export default function PurchasesDashboardPage() {
                 <CardTitle>{card.title}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                <div className="text-2xl font-semibold text-slate-900">0</div>
+                <div className="text-2xl font-semibold text-slate-900">
+                  {card.href === "/purchases/upsells" ? upsellPendingCount : 0}
+                </div>
                 <div className="text-xs text-slate-500">Solicitudes</div>
                 <p className="text-sm text-slate-600">{card.description}</p>
               </CardContent>

@@ -21,6 +21,7 @@ import type {
   PayrollRoleConfig,
   Trip,
   TripMember,
+  UpsellOrder,
   TimePunch,
   UpdatePayrollGlobalConfig,
   UpdatePayrollRoleConfig,
@@ -29,6 +30,8 @@ import type {
   UpdateClientPatch,
   UpdateBillingConfig,
   UpdateLeadPatch,
+  CreateUpsellOrderInput,
+  UpdateUpsellOrderPatch,
   UpdateTripMemberPatch,
 } from "../types/ops";
 import type { BillingConfig } from "../types/ops";
@@ -78,6 +81,9 @@ export interface IOpsRepo {
   listLeads(): Promise<Lead[]>;
   createLead(input: CreateLeadInput): Promise<Lead>;
   updateLead(leadId: string, patch: UpdateLeadPatch): Promise<Lead | null>;
+  listUpsellOrders(): Promise<UpsellOrder[]>;
+  createUpsellOrder(input: CreateUpsellOrderInput): Promise<UpsellOrder>;
+  updateUpsellOrder(orderId: string, patch: UpdateUpsellOrderPatch): Promise<UpsellOrder | null>;
   listCatalog(catalogName: CatalogName): Promise<CatalogItem[]>;
   addCatalogItem(catalogName: CatalogName, name: string): Promise<CatalogItem>;
   updateCatalogItem(

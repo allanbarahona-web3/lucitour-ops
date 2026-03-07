@@ -21,12 +21,16 @@ import type {
   PayrollRoleConfig,
   Trip,
   TripMember,
+  UpsellOrder,
+  UpsellOrderLine,
   TimePunch,
   UpdateContractModificationPatch,
   UpdateCatalogItemPatch,
   UpdateClientPatch,
   UpdateBillingConfig,
   UpdateLeadPatch,
+  CreateUpsellOrderInput,
+  UpdateUpsellOrderPatch,
   UpdatePayrollGlobalConfig,
   UpdatePayrollRoleConfig,
   UpdateTripMemberPatch,
@@ -42,6 +46,7 @@ import {
   BillingStatus,
   QuoteStatus,
   TimePunchType,
+  UpsellOrderStatus,
 } from "../types/ops";
 import { currentUser } from "../auth/mockSession";
 import {
@@ -119,6 +124,7 @@ export class MockOpsRepo implements IOpsRepo {
   private holidayCounter = 0;
   private deductionCounter = 0;
   private payslipCounter = 0;
+  private upsellOrderCounter = 0;
 
   private trips: Trip[] = [
     {
@@ -176,6 +182,8 @@ export class MockOpsRepo implements IOpsRepo {
       reservationMinPerPerson: 300,
       reservationFinalPerPerson: 300,
       paymentPlanMonths: 6,
+      paymentBalanceTotal: 900,
+      paymentInstallmentAmount: 150,
       accommodationType: "TWIN",
       seatUnitPrice: 0,
       luggageType: "CARRY_ON",
@@ -250,6 +258,8 @@ export class MockOpsRepo implements IOpsRepo {
       reservationMinPerPerson: 300,
       reservationFinalPerPerson: 300,
       paymentPlanMonths: 6,
+      paymentBalanceTotal: 1800,
+      paymentInstallmentAmount: 300,
       accommodationType: "MATRIMONIAL",
       seatUnitPrice: 0,
       luggageType: "CARRY_ON",
@@ -324,6 +334,8 @@ export class MockOpsRepo implements IOpsRepo {
       reservationMinPerPerson: 200,
       reservationFinalPerPerson: 200,
       paymentPlanMonths: 6,
+      paymentBalanceTotal: 650,
+      paymentInstallmentAmount: 108.33,
       accommodationType: "TWIN",
       seatUnitPrice: 0,
       luggageType: "CARRY_ON",
@@ -403,6 +415,8 @@ export class MockOpsRepo implements IOpsRepo {
       quoteTripMemberId: null,
     },
   ];
+
+  private upsellOrders: UpsellOrder[] = [];
 
   private clients: Client[] = [
     {
@@ -815,6 +829,8 @@ export class MockOpsRepo implements IOpsRepo {
       ...input,
       reservationCode: makeUniqueReservationCode(existingCodes),
       clientId: input.clientId ?? null,
+      paymentBalanceTotal: input.paymentBalanceTotal ?? null,
+      paymentInstallmentAmount: input.paymentInstallmentAmount ?? null,
       billingTotalAmount: input.billingTotalAmount ?? null,
     };
 
@@ -1084,6 +1100,82 @@ export class MockOpsRepo implements IOpsRepo {
 
     this.leads[index] = updated;
     return { ...updated };
+  }
+
+  async listUpsellOrders(): Promise<UpsellOrder[]> {
+    return this.upsellOrders.map((order) => ({
+      ...order,
+      lines: order.lines.map((line) => ({ ...line })),
+    }));
+  }
+
+  async createUpsellOrder(input: CreateUpsellOrderInput): Promise<UpsellOrder> {
+    const now = nowIso();
+    const normalizedLines: UpsellOrderLine[] = input.lines.map((line) => ({
+      ...line,
+      ownerName: line.ownerName?.trim() || "Titular",
+      quantity: Math.max(0, line.quantity),
+      unitPrice: Math.max(0, line.unitPrice),
+      totalPrice: Math.max(0, line.quantity) * Math.max(0, line.unitPrice),
+    }));
+    const totalAmount = normalizedLines.reduce((sum, line) => sum + line.totalPrice, 0);
+
+    const created: UpsellOrder = {
+      id: makeId("upsell", ++this.upsellOrderCounter),
+      tripId: input.tripId,
+      tripMemberId: input.tripMemberId,
+      leadId: input.leadId ?? null,
+      clientId: input.clientId ?? null,
+      quoteCode: input.quoteCode ?? null,
+      status: input.status ?? UpsellOrderStatus.SENT_TO_PURCHASES,
+      currency: input.currency ?? "USD",
+      totalAmount,
+      notes: input.notes ?? "",
+      lines: normalizedLines,
+      createdByUserId: input.createdByUserId,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.upsellOrders.push(created);
+    return {
+      ...created,
+      lines: created.lines.map((line) => ({ ...line })),
+    };
+  }
+
+  async updateUpsellOrder(
+    orderId: string,
+    patch: UpdateUpsellOrderPatch,
+  ): Promise<UpsellOrder | null> {
+    const index = this.upsellOrders.findIndex((order) => order.id === orderId);
+    if (index === -1) {
+      return null;
+    }
+
+    const nextLines = patch.lines
+      ? patch.lines.map((line) => ({
+          ...line,
+          ownerName: line.ownerName?.trim() || "Titular",
+          quantity: Math.max(0, line.quantity),
+          unitPrice: Math.max(0, line.unitPrice),
+          totalPrice: Math.max(0, line.quantity) * Math.max(0, line.unitPrice),
+        }))
+      : this.upsellOrders[index].lines;
+
+    const updated: UpsellOrder = {
+      ...this.upsellOrders[index],
+      ...patch,
+      lines: nextLines,
+      totalAmount: nextLines.reduce((sum, line) => sum + line.totalPrice, 0),
+      updatedAt: nowIso(),
+    };
+
+    this.upsellOrders[index] = updated;
+    return {
+      ...updated,
+      lines: updated.lines.map((line) => ({ ...line })),
+    };
   }
 
   async addCatalogItem(catalogName: CatalogName, name: string): Promise<CatalogItem> {

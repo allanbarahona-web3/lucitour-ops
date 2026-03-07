@@ -216,6 +216,50 @@ export interface TripExtraItem {
   unitPrice: number | null;
 }
 
+export type UpsellType =
+  | "SEAT"
+  | "LUGGAGE"
+  | "TOUR"
+  | "INSURANCE"
+  | "FLIGHT"
+  | "OTHER";
+
+export enum UpsellOrderStatus {
+  DRAFT = "DRAFT",
+  SENT_TO_PURCHASES = "SENT_TO_PURCHASES",
+  IN_PROGRESS = "IN_PROGRESS",
+  PURCHASED = "PURCHASED",
+  BILLED = "BILLED",
+  CANCELLED = "CANCELLED",
+}
+
+export interface UpsellOrderLine {
+  id: string;
+  type: UpsellType;
+  label: string;
+  ownerName: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+}
+
+export interface UpsellOrder {
+  id: string;
+  tripId: string;
+  tripMemberId: string;
+  leadId: string | null;
+  clientId: string | null;
+  quoteCode: string | null;
+  status: UpsellOrderStatus;
+  currency: "USD";
+  totalAmount: number;
+  notes: string;
+  lines: UpsellOrderLine[];
+  createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Trip {
   id: string;
   name: string;
@@ -258,6 +302,8 @@ export interface TripMember {
   reservationMinPerPerson: number | null;
   reservationFinalPerPerson: number | null;
   paymentPlanMonths: number | null;
+  paymentBalanceTotal: number | null;
+  paymentInstallmentAmount: number | null;
   accommodationType: TripAccommodationType | "";
   seatUnitPrice: number | null;
   luggageType: TripLuggageType | "";
@@ -446,6 +492,24 @@ export interface ClientPurchase {
   createdAt: string;
 }
 
+export interface CreateUpsellOrderInput {
+  tripId: string;
+  tripMemberId: string;
+  leadId?: string | null;
+  clientId?: string | null;
+  quoteCode?: string | null;
+  status?: UpsellOrderStatus;
+  currency?: "USD";
+  totalAmount: number;
+  notes?: string;
+  lines: UpsellOrderLine[];
+  createdByUserId: string;
+}
+
+export type UpdateUpsellOrderPatch = Partial<
+  Omit<UpsellOrder, "id" | "tripId" | "tripMemberId" | "createdAt" | "createdByUserId">
+>;
+
 export type CatalogName =
   | "airlines"
   | "lodgingTypes"
@@ -461,11 +525,18 @@ export type CreateTripMemberInput = Omit<
   | "id"
   | "tripId"
   | "clientId"
+  | "paymentBalanceTotal"
+  | "paymentInstallmentAmount"
   | "enteredByUserId"
   | "assignedToUserId"
   | "createdAt"
   | "updatedAt"
-> & { assignedToUserId?: string; clientId?: string | null };
+> & {
+  assignedToUserId?: string;
+  clientId?: string | null;
+  paymentBalanceTotal?: number | null;
+  paymentInstallmentAmount?: number | null;
+};
 
 export type UpdateTripMemberPatch = Partial<
   Omit<TripMember, "id" | "tripId" | "enteredByUserId">

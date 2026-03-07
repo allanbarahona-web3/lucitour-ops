@@ -1,13 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { useSession } from "../../lib/auth/sessionContext";
 import { getOpsRepo } from "../../lib/data/opsRepo";
-import { ContractModificationStatus, QuoteStatus, Role, TimePunchType } from "../../lib/types/ops";
+import {
+  ContractModificationStatus,
+  QuoteStatus,
+  Role,
+  TimePunchType,
+  UpsellOrderStatus,
+} from "../../lib/types/ops";
 import { Button } from "../ui/button";
 
 interface AppShellProps {
@@ -22,10 +28,13 @@ export const AppShell = ({ children }: AppShellProps) => {
   const [modificationCount, setModificationCount] = useState(0);
   const [quoteCount, setQuoteCount] = useState(0);
   const [wonQuoteCount, setWonQuoteCount] = useState(0);
+  const [upsellPendingCount, setUpsellPendingCount] = useState(0);
+  const [showUpsellAlert, setShowUpsellAlert] = useState(false);
   const [hasStartedShift, setHasStartedShift] = useState(true);
   const [isCheckingShift, setIsCheckingShift] = useState(false);
   const [isPunching, setIsPunching] = useState(false);
   const [punchError, setPunchError] = useState<string | null>(null);
+  const lastUpsellPendingRef = useRef(0);
 
   const getHomeRoute = (role: Role) => {
     switch (role) {
@@ -198,6 +207,41 @@ export const AppShell = ({ children }: AppShellProps) => {
     return () => clearInterval(interval);
   }, [isAuthenticated, isReady, repo]);
 
+  useEffect(() => {
+    if (!isAuthenticated || !isReady) {
+      return;
+    }
+
+    const loadUpsellQueue = async () => {
+      const orders = await repo.listUpsellOrders();
+      const pendingCount = orders.filter(
+        (order) =>
+          order.status === UpsellOrderStatus.SENT_TO_PURCHASES ||
+          order.status === UpsellOrderStatus.IN_PROGRESS,
+      ).length;
+      if (
+        (user.role === Role.PURCHASES || user.role === Role.ADMIN) &&
+        pendingCount > lastUpsellPendingRef.current
+      ) {
+        setShowUpsellAlert(true);
+      }
+      lastUpsellPendingRef.current = pendingCount;
+      setUpsellPendingCount(pendingCount);
+    };
+
+    void loadUpsellQueue();
+    const interval = setInterval(loadUpsellQueue, 15000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, isReady, repo, user.role]);
+
+  useEffect(() => {
+    if (!showUpsellAlert) {
+      return;
+    }
+    const timer = setTimeout(() => setShowUpsellAlert(false), 5000);
+    return () => clearTimeout(timer);
+  }, [showUpsellAlert]);
+
   const handleStartShift = async () => {
     if (isPunching) {
       return;
@@ -230,6 +274,7 @@ export const AppShell = ({ children }: AppShellProps) => {
             modificationCount={modificationCount}
             quoteCount={quoteCount}
             wonQuoteCount={wonQuoteCount}
+            upsellPendingCount={upsellPendingCount}
           />
           <div className="flex flex-1 flex-col">
             <Topbar user={user} />
@@ -256,6 +301,11 @@ export const AppShell = ({ children }: AppShellProps) => {
                   </Button>
                 </div>
               </div>
+            </div>
+          ) : null}
+          {showUpsellAlert ? (
+            <div className="fixed right-6 top-20 z-50 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 shadow-lg animate-pulse">
+              Nuevos upsells pendientes en Compras.
             </div>
           ) : null}
         </div>

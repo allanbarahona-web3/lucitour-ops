@@ -81,8 +81,9 @@ const navItems = [
   },
   {
     href: "/purchases/upsells",
-    label: "Upsells",
+    label: "Upsells pendientes",
     roles: ["ADMIN", "PURCHASES"] as Role[],
+    badgeKey: "upsells-pending",
   },
   {
     href: "/purchases/check-in",
@@ -98,6 +99,7 @@ interface SidebarProps {
   modificationCount?: number;
   quoteCount?: number;
   wonQuoteCount?: number;
+  upsellPendingCount?: number;
 }
 
 const isActive = (pathname: string, href: string) =>
@@ -108,6 +110,7 @@ export const Sidebar = ({
   modificationCount = 0,
   quoteCount = 0,
   wonQuoteCount = 0,
+  upsellPendingCount = 0,
 }: SidebarProps) => {
   const pathname = usePathname();
 
@@ -120,7 +123,9 @@ export const Sidebar = ({
         const showBadge =
           (item.badgeKey === "modifications" && modificationCount > 0) ||
           (item.badgeKey === "quotes" && quoteCount > 0) ||
-          (item.badgeKey === "won-quotes" && wonQuoteCount > 0);
+          (item.badgeKey === "won-quotes" && wonQuoteCount > 0) ||
+          (item.badgeKey === "upsells-pending" && upsellPendingCount > 0);
+        const badgeCount = item.badgeKey === "upsells-pending" ? upsellPendingCount : 0;
         return (
           <Link
             key={item.href}
@@ -133,7 +138,13 @@ export const Sidebar = ({
           >
             <span>{item.label}</span>
             {showBadge ? (
-              <span className="ml-2 inline-flex h-2 w-2 rounded-full bg-rose-500" />
+              item.badgeKey === "upsells-pending" ? (
+                <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700 animate-pulse">
+                  {badgeCount}
+                </span>
+              ) : (
+                <span className="ml-2 inline-flex h-2 w-2 rounded-full bg-rose-500" />
+              )
             ) : null}
           </Link>
         );
