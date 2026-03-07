@@ -9,6 +9,21 @@ import type { CatalogItem, Lead } from "@/lib/types/ops";
 const inputClassName =
   "w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900";
 
+const LEAD_PENDING_TAG = "[PENDIENTE_PASAJERO]";
+
+const stripPendingTag = (notes: string) =>
+  notes
+    .replaceAll(LEAD_PENDING_TAG, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join("\n");
+
+const withPendingTag = (notes: string) => {
+  const cleanNotes = stripPendingTag(notes);
+  return cleanNotes.length > 0 ? `${cleanNotes}\n${LEAD_PENDING_TAG}` : LEAD_PENDING_TAG;
+};
+
 export default function LeadsPage() {
   const repo = useMemo(() => getOpsRepo(), []);
   const { users, user } = useSession();
@@ -100,11 +115,15 @@ export default function LeadsPage() {
                 <th className="px-3 py-2">Tipo ID</th>
                 <th className="px-3 py-2">Telefono</th>
                 <th className="px-3 py-2">Correo</th>
+                <th className="px-3 py-2">Seguimiento</th>
                 <th className="px-3 py-2">Notas</th>
               </tr>
             </thead>
             <tbody>
-              {leads.map((lead) => (
+              {leads.map((lead) => {
+                const hasPendingPassenger = (lead.notes ?? "").includes(LEAD_PENDING_TAG);
+                const cleanNotes = stripPendingTag(lead.notes ?? "");
+                return (
                 <tr key={lead.id} className="border-t border-slate-100">
                   <td className="px-3 py-2 text-slate-600">
                     {new Date(lead.createdAt).toLocaleString()}
@@ -138,20 +157,34 @@ export default function LeadsPage() {
                   <td className="px-3 py-2">{lead.phone}</td>
                   <td className="px-3 py-2">{lead.email}</td>
                   <td className="px-3 py-2">
+                    {hasPendingPassenger ? (
+                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                        Pendiente pasajero
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">-</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
                     <textarea
                       className="min-h-[60px] w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900"
-                      value={lead.notes}
+                      value={cleanNotes}
                       onChange={(event) =>
                         scheduleUpdate(
                           lead.id,
-                          { notes: event.target.value },
+                          {
+                            notes: hasPendingPassenger
+                              ? withPendingTag(event.target.value)
+                              : event.target.value,
+                          },
                           `${lead.id}:notes`,
                         )
                       }
                     />
                   </td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>

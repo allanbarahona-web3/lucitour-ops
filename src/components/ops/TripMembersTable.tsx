@@ -60,6 +60,8 @@ const maritalOptions = [
 const selectClassName =
   "w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900";
 
+const LEAD_PENDING_TAG = "[PENDIENTE_PASAJERO]";
+
 const inputClassName =
   "w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900";
 
@@ -366,6 +368,44 @@ export const TripMembersTable = ({
 
     updateMemberLocal(memberId, patch);
     await persistUpdate(memberId, patch);
+
+    // Keep a visible follow-up marker in the related Lead when passenger setup is saved as draft.
+    if (typeof patch.isDraft === "boolean") {
+      const member = members.find((item) => item.id === memberId);
+      if (member) {
+        const leads = await repo.listLeads();
+        const relatedLead = leads.find(
+          (lead) =>
+            lead.quoteTripMemberId === memberId ||
+            (member.quoteCode && lead.quoteCode === member.quoteCode),
+        );
+
+        if (relatedLead) {
+          const currentNotes = relatedLead.notes ?? "";
+          const hasPendingTag = currentNotes.includes(LEAD_PENDING_TAG);
+
+          let nextNotes = currentNotes;
+          if (patch.isDraft && !hasPendingTag) {
+            nextNotes = currentNotes.trim().length
+              ? `${currentNotes.trim()}\n${LEAD_PENDING_TAG}`
+              : LEAD_PENDING_TAG;
+          }
+
+          if (!patch.isDraft && hasPendingTag) {
+            nextNotes = currentNotes
+              .replaceAll(LEAD_PENDING_TAG, "")
+              .split("\n")
+              .map((line) => line.trim())
+              .filter((line) => line.length > 0)
+              .join("\n");
+          }
+
+          if (nextNotes !== currentNotes) {
+            await repo.updateLead(relatedLead.id, { notes: nextNotes });
+          }
+        }
+      }
+    }
   };
 
   const handleDetailsSave = async () => {
