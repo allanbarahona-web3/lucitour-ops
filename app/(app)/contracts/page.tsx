@@ -995,54 +995,56 @@ export default function ContractsPage() {
       )}
 
       <Dialog open={itineraryDialog.open} onOpenChange={(next) => (next ? null : closeItineraryDialog())}>
-        <DialogContent className="max-h-[80vh] w-[98vw] max-w-[100rem] overflow-y-auto overflow-x-hidden">
+        <DialogContent className="flex h-[80vh] w-[98vw] max-w-[100rem] flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>
               Itinerario manual {itineraryDialog.member ? `· ${itineraryDialog.member.fullName}` : ""}
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-3">
-            {itineraryDraft.map((item, index) => (
-              (() => {
-                const isFixedFlight = index === 0 || index === itineraryDraft.length - 1;
-                return (
-              <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 p-3 md:grid-cols-[160px_1fr_auto]">
-                <input
-                  type="date"
-                  value={item.date}
-                  onChange={(event) => updateItineraryLine(index, { date: event.target.value })}
-                  disabled={isFixedFlight}
-                  className="rounded-md border border-slate-300 px-2 py-1 text-sm"
-                />
-                <textarea
-                  value={item.activity}
-                  onChange={(event) => updateItineraryLine(index, { activity: event.target.value })}
-                  placeholder="Actividad"
-                  maxLength={500}
-                  disabled={isFixedFlight}
-                  className="min-h-[70px] rounded-md border border-slate-300 px-2 py-1 text-sm"
-                />
-                {isFixedFlight ? (
-                  <span className="text-xs font-semibold text-slate-500">Fijo</span>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => removeItineraryLine(index)}
-                  >
-                    Quitar
-                  </Button>
-                )}
-              </div>
-                );
-              })()
-            ))}
+          <div className="flex-1 overflow-y-auto pr-1">
+            <div className="space-y-3">
+              {itineraryDraft.map((item, index) => (
+                (() => {
+                  const isFixedFlight = index === 0 || index === itineraryDraft.length - 1;
+                  return (
+                <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 p-3 md:grid-cols-[160px_1fr_auto]">
+                  <input
+                    type="date"
+                    value={item.date}
+                    onChange={(event) => updateItineraryLine(index, { date: event.target.value })}
+                    disabled={isFixedFlight}
+                    className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  />
+                  <textarea
+                    value={item.activity}
+                    onChange={(event) => updateItineraryLine(index, { activity: event.target.value })}
+                    placeholder="Actividad"
+                    maxLength={500}
+                    disabled={isFixedFlight}
+                    className="min-h-[70px] rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  />
+                  {isFixedFlight ? (
+                    <span className="text-xs font-semibold text-slate-500">Fijo</span>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => removeItineraryLine(index)}
+                    >
+                      Quitar
+                    </Button>
+                  )}
+                </div>
+                  );
+                })()
+              ))}
 
-            <Button type="button" variant="outline" size="sm" onClick={addItineraryLine}>
-              Agregar actividad
-            </Button>
+              <Button type="button" variant="outline" size="sm" onClick={addItineraryLine}>
+                Agregar actividad
+              </Button>
+            </div>
           </div>
 
           <DialogFooter>

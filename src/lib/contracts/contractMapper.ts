@@ -179,6 +179,7 @@ export const mapTripMemberToContractDraft = (
   trip?: Trip,
   overrides: ContractDraftOverrides = {},
 ): ContractDraftResult => {
+  const seats = Math.max(1, member.seats || 1);
   const idType = resolveIdType(member.identificationTypeId);
   const nationality = resolveNationality(member.nationalityId);
 
@@ -212,6 +213,19 @@ export const mapTripMemberToContractDraft = (
 
   const hasInstallments = (member.paymentPlanMonths ?? 0) > 0;
   const installmentAmount = Math.max(0, member.paymentInstallmentAmount ?? 0);
+  const packagePerPerson = Math.max(0, member.packageFinalPrice ?? member.packageBasePrice ?? 0);
+  const packageTotal = packagePerPerson * seats;
+  const reservationPerPerson = Math.max(
+    0,
+    member.reservationFinalPerPerson ?? member.reservationMinPerPerson ?? 0,
+  );
+  const reservationTotalFromPerPerson = reservationPerPerson * seats;
+  const paymentBalanceTotal = Math.max(0, member.paymentBalanceTotal ?? 0);
+  const reservationTotalFromBalance = Math.max(0, packageTotal - paymentBalanceTotal);
+  const initialReservationTotal =
+    reservationTotalFromPerPerson > 0
+      ? reservationTotalFromPerPerson
+      : reservationTotalFromBalance;
   const installmentsSummary = hasInstallments
     ? `${member.paymentPlanMonths} cuotas de US$ ${installmentAmount.toFixed(2)}`
     : "";
@@ -260,7 +274,7 @@ export const mapTripMemberToContractDraft = (
     payment: {
       totalAmount: Math.max(0, member.packageFinalPrice ?? 0),
       plan: hasInstallments ? "installments" : "cash",
-      initialAmount: Math.max(0, member.reservationFinalPerPerson ?? 0),
+      initialAmount: initialReservationTotal,
       installmentsSummary,
       dueDate: subtractDaysIso(trip?.dateFrom, 22),
       paidAt: hasInstallments ? "" : toIsoDate(member.updatedAt),
