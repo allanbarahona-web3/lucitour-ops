@@ -247,7 +247,7 @@ export const AddTripMemberDialog = ({
       reservationMinPerPerson: tripReservationMinPerPerson,
       reservationFinalPerPerson: tripReservationMinPerPerson,
       paymentPlanMonths: null,
-      accommodationType: "TWIN",
+      accommodationType: "",
       seatUnitPrice: null,
       luggageType: "",
       luggageQuantity: null,

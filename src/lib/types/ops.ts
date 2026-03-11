@@ -180,6 +180,7 @@ export interface DocumentUpload {
 export interface Companion {
   id: string;
   fullName: string;
+  identificationTypeId: string;
   identification: string;
   email: string;
   phone: string;

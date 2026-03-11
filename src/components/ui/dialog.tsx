@@ -29,6 +29,13 @@ export const DialogHeader = ({
   <div className={`mb-4 space-y-1 ${className}`} {...props} />
 );
 
+export const DialogFooter = ({
+  className = "",
+  ...props
+}: HTMLAttributes<HTMLDivElement>) => (
+  <div className={`mt-4 flex items-center justify-end gap-2 ${className}`} {...props} />
+);
+
 export const DialogTitle = ({
   className = "",
   ...props

@@ -239,6 +239,7 @@ export const TripMembersTable = ({
       ...member,
       companions: (member.companions ?? []).map((companion) => ({
         ...companion,
+        identificationTypeId: companion.identificationTypeId ?? "",
         email: companion.email ?? "",
         phone: companion.phone ?? "",
         address: companion.address ?? "",
@@ -676,6 +677,17 @@ export const TripMembersTable = ({
     ]);
   };
 
+  const getUpsellDefaultLabel = (type: UpsellType) => {
+    switch (type) {
+      case "SEAT":
+        return "Asientos adicionales";
+      case "INSURANCE":
+        return "Seguros";
+      default:
+        return "";
+    }
+  };
+
   const addUpsellLine = (type: UpsellType, label = "") => {
     const titularName = upsellDialog.member?.fullName?.trim() || "Titular";
     setUpsellLines((prev) => [
@@ -689,6 +701,10 @@ export const TripMembersTable = ({
         unitPrice: null,
       },
     ]);
+  };
+
+  const addUpsellLineByType = (type: UpsellType) => {
+    addUpsellLine(type, getUpsellDefaultLabel(type));
   };
 
   const removeUpsellLine = (lineId: string) => {
@@ -977,6 +993,7 @@ const requiresMinorPermit = (member: TripMember) =>
           member.companions.every(
             (companion) =>
               isFilled(companion.fullName) &&
+              isFilled(companion.identificationTypeId) &&
               isFilled(companion.identification) &&
               isFilled(companion.email) &&
               isFilled(companion.phone) &&
@@ -1626,6 +1643,29 @@ const requiresMinorPermit = (member: TripMember) =>
                                             />
                                           </div>
                                           <div className="space-y-1">
+                                            <div className="text-xs font-semibold text-slate-600">Tipo ID</div>
+                                            <select
+                                              className={selectClassName}
+                                              value={companion.identificationTypeId}
+                                              disabled={step2Locked}
+                                              onChange={(event) => {
+                                                const next = [...member.companions];
+                                                next[index] = {
+                                                  ...companion,
+                                                  identificationTypeId: event.target.value,
+                                                };
+                                                updateCompanions(member, next);
+                                              }}
+                                            >
+                                              <option value="">Selecciona</option>
+                                              {catalogOptions.identificationTypes.map((item) => (
+                                                <option key={item.id} value={item.id}>
+                                                  {item.name}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+                                          <div className="space-y-1">
                                             <div className="text-xs font-semibold text-slate-600">Correo</div>
                                             <input
                                               className={inputClassName}
@@ -1738,6 +1778,7 @@ const requiresMinorPermit = (member: TripMember) =>
                                         {
                                           id: `${member.id}-companion-${Date.now()}`,
                                           fullName: "",
+                                          identificationTypeId: "",
                                           identification: "",
                                           email: "",
                                           phone: "",
@@ -3905,6 +3946,25 @@ const requiresMinorPermit = (member: TripMember) =>
                           />
                         </div>
                         <div className="space-y-1">
+                          <div className="text-xs font-semibold text-slate-600">Tipo ID</div>
+                          <select
+                            className={selectClassName}
+                            value={companion.identificationTypeId}
+                            onChange={(event) => {
+                              const next = [...draft.companions];
+                              next[index] = { ...companion, identificationTypeId: event.target.value };
+                              updateCompanionsDraft(next);
+                            }}
+                          >
+                            <option value="">Selecciona</option>
+                            {catalogOptions.identificationTypes.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
                           <div className="text-xs font-semibold text-slate-600">Correo</div>
                           <input
                             className={inputClassName}
@@ -4008,6 +4068,7 @@ const requiresMinorPermit = (member: TripMember) =>
                     {
                       id: `${draft.id}-companion-${Date.now()}`,
                       fullName: "",
+                      identificationTypeId: "",
                       identification: "",
                       email: "",
                       phone: "",
@@ -4431,7 +4492,7 @@ const requiresMinorPermit = (member: TripMember) =>
             }
           }}
         >
-          <DialogContent className="max-w-6xl">
+          <DialogContent className="max-h-[92vh] w-[98vw] max-w-[1400px] overflow-y-auto p-5 sm:p-6">
             <DialogHeader>
               <DialogTitle>Anexo de adicionales</DialogTitle>
             </DialogHeader>
@@ -4440,7 +4501,8 @@ const requiresMinorPermit = (member: TripMember) =>
                 Pasajero: <span className="font-semibold text-slate-900">{upsellDialog.member?.fullName ?? "-"}</span>
               </div>
               <div className="rounded-md border border-slate-200">
-                <table className="w-full border-collapse text-xs">
+                <div className="overflow-x-auto">
+                <table className="w-full min-w-[1150px] border-collapse text-xs">
                   <thead className="bg-slate-50 text-left text-slate-600">
                     <tr>
                       <th className="px-3 py-2">Tipo</th>
@@ -4567,34 +4629,20 @@ const requiresMinorPermit = (member: TripMember) =>
                           </td>
                           <td className="px-3 py-2 font-semibold text-slate-900">USD {lineTotal.toFixed(2)}</td>
                           <td className="px-3 py-2">
-                            <Button size="sm" variant="outline" onClick={() => removeUpsellLine(line.id)}>
-                              Quitar
-                            </Button>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button size="sm" variant="outline" onClick={() => addUpsellLineByType(line.type)}>
+                                Agregar
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => removeUpsellLine(line.id)}>
+                                Quitar
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
-                <div className="flex flex-wrap gap-2 border-t border-slate-200 px-3 py-2">
-                  <Button size="sm" variant="outline" onClick={() => addUpsellLine("SEAT", "Asientos adicionales")}>
-                    Agregar asiento
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => addUpsellLine("LUGGAGE", "")}>
-                    Agregar equipaje
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => addUpsellLine("INSURANCE", "Seguros")}>
-                    Agregar seguro
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => addUpsellLine("TOUR", "")}>
-                    Agregar tour
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => addUpsellLine("FLIGHT", "")}>
-                    Agregar vuelo
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => addUpsellLine("OTHER", "")}>
-                    Agregar otro
-                  </Button>
                 </div>
               </div>
 
