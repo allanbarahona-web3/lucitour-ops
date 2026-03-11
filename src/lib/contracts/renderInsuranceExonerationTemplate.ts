@@ -12,6 +12,10 @@ export interface InsuranceExonerationPayload {
   emergencyContactName: string;
   emergencyContactPhone: string;
   hasOwnInsurance: boolean | null;
+  includeEdwin: boolean;
+  includeErick: boolean;
+  lucitoursEdwinDate: string;
+  lucitoursErickDate: string;
   issuedAt: string;
 }
 
@@ -67,8 +71,26 @@ export const renderInsuranceExonerationPreview = (
   lines.push(`Identificacion: ${payload.travelerIdType || "-"} ${payload.travelerIdNumber || "-"}`);
   lines.push("");
   lines.push("Lucitours:");
-  lines.push("______________________________");
-  lines.push("Representante legal");
+  if (payload.includeEdwin) {
+    lines.push("______________________________");
+    lines.push("EDWIN EDUARDO BONILLA CORDERO");
+    lines.push("Cedula de identidad: 3-0238-0791");
+    lines.push("Representante legal");
+    lines.push(`Fecha: ${payload.lucitoursEdwinDate || "-"}`);
+  }
+
+  if (payload.includeErick) {
+    lines.push("______________________________");
+    lines.push("ERICK JOSUE BONILLA PEREIRA");
+    lines.push("Cedula de identidad: 1-1597-0559");
+    lines.push("Representante legal");
+    lines.push(`Fecha: ${payload.lucitoursErickDate || "-"}`);
+  }
+
+  if (!payload.includeEdwin && !payload.includeErick) {
+    lines.push("______________________________");
+    lines.push("Representante legal");
+  }
   lines.push("");
   lines.push(`Fecha de emision: ${payload.issuedAt || "-"}`);
 

@@ -779,6 +779,10 @@ export default function ContractsPage() {
             emergencyContactName: traveler.emergencyContactName,
             emergencyContactPhone: traveler.emergencyContactPhone,
             hasOwnInsurance: traveler.hasOwnInsurance,
+            includeEdwin: exonerationDraft.payload.lucitours.signatories.includeEdwin,
+            includeErick: exonerationDraft.payload.lucitours.signatories.includeErick,
+            lucitoursEdwinDate: exonerationDraft.payload.signatures.lucitoursEdwinDate,
+            lucitoursErickDate: exonerationDraft.payload.signatures.lucitoursErickDate,
             issuedAt: formatIsoDate(new Date().toISOString()),
           }),
         }))
@@ -1086,16 +1090,20 @@ export default function ContractsPage() {
                     traveler.hasOwnInsurance === true || traveler.wantsInsuranceWithLucitours === false,
                 );
                 const hasMinorPermitAnnex = member.companions.some((companion) => companion.isMinor);
-                const annexStatusLabel = annexState?.signedAt
-                  ? "Firmado"
-                  : annexState?.sentAt
-                    ? "Enviado"
-                    : "Borrador";
-                const annexStatusClass = annexState?.signedAt
-                  ? "bg-emerald-100 text-emerald-700"
-                  : annexState?.sentAt
-                    ? "bg-sky-100 text-sky-700"
-                    : "bg-slate-100 text-slate-700";
+                const annexStatusLabel = !hasInsuranceAnnex
+                  ? "No aplica"
+                  : annexState?.signedAt
+                    ? "Firmado"
+                    : annexState?.sentAt
+                      ? "Enviado"
+                      : "Borrador";
+                const annexStatusClass = !hasInsuranceAnnex
+                  ? "bg-slate-100 text-slate-500"
+                  : annexState?.signedAt
+                    ? "bg-emerald-100 text-emerald-700"
+                    : annexState?.sentAt
+                      ? "bg-sky-100 text-sky-700"
+                      : "bg-slate-100 text-slate-700";
                 return (
                   <tr key={member.id} className="border-t border-slate-100">
                     <td className="px-3 py-2 font-medium text-slate-900">
@@ -1167,12 +1175,14 @@ export default function ContractsPage() {
                         <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${annexStatusClass}`}>
                           {annexStatusLabel}
                         </span>
-                        {annexState?.sentAt ? (
+                        {hasInsuranceAnnex && annexState?.sentAt ? (
                           <span className="text-[11px] text-slate-500">
                             Enviado: {formatDateTime(annexState.sentAt)}
                           </span>
                         ) : null}
-                        {annexPastCutoff ? (
+                        {!hasInsuranceAnnex ? (
+                          <span className="text-[11px] text-slate-500">No aplica</span>
+                        ) : annexPastCutoff ? (
                           <span className="text-[11px] font-semibold text-rose-600">Corte 48h vencido</span>
                         ) : (
                           <span className="text-[11px] text-slate-500">Editable hasta 48h antes</span>
@@ -1257,7 +1267,7 @@ export default function ContractsPage() {
                           type="button"
                           onClick={() => openAnnexDialog(member.id)}
                           disabled={!hasInsuranceAnnex}
-                          className="text-left text-xs font-semibold text-cyan-600 hover:underline"
+                          className="text-left text-xs font-semibold text-cyan-600 hover:underline disabled:text-slate-400 disabled:no-underline"
                         >
                           {hasInsuranceAnnex ? "Ver anexo seguro" : "Sin anexo seguro"}
                         </button>
@@ -1613,7 +1623,20 @@ export default function ContractsPage() {
                               : "Borrador"}
                         </span>
                       </div>
-                      <div className="mb-2 flex flex-wrap gap-2">
+
+                      <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                        <div className="font-mono text-[11px] leading-5 text-slate-800">
+                          {annex.previewText
+                            .split("\n")
+                            .map((line, idx) => (
+                              <div key={`${annex.annexNumber}-${idx}`} className="whitespace-pre-wrap">
+                                {line.length > 0 ? line : "\u00A0"}
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
                         <Button
                           type="button"
                           size="sm"
@@ -1658,17 +1681,6 @@ export default function ContractsPage() {
                         >
                           Descargar exoneracion
                         </Button>
-                      </div>
-                      <div className="max-h-40 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-2">
-                        <div className="font-mono text-[11px] leading-5 text-slate-800">
-                          {annex.previewText
-                            .split("\n")
-                            .map((line, idx) => (
-                              <div key={`${annex.annexNumber}-${idx}`} className="whitespace-pre-wrap">
-                                {line.length > 0 ? line : "\u00A0"}
-                              </div>
-                            ))}
-                        </div>
                       </div>
                     </div>
                   ))}
