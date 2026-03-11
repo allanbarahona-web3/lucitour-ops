@@ -17,10 +17,12 @@ import { ContractsWorkflowStatus, Role, type DocumentType, type Trip, type TripM
 import { mapTripMemberToContractDraft } from "@/lib/contracts/contractMapper";
 import { renderContractGeneralPreview } from "@/lib/contracts/renderContractTemplate";
 import { renderInsuranceAnnexPreview } from "@/lib/contracts/renderInsuranceAnnexTemplate";
+import { renderInsuranceExonerationPreview } from "@/lib/contracts/renderInsuranceExonerationTemplate";
 
 type ItineraryItem = { date: string; activity: string };
 type LucitoursSigner = "none" | "edwin" | "erick" | "both";
 type AnnexStatusByMember = Record<string, { sentAt: string | null; signedAt: string | null }>;
+type ExonerationStatusByAnnex = Record<string, { sentAt: string | null; signedAt: string | null }>;
 type DocumentsOwnerFilter = "ALL" | string;
 type WorkQueueFilter = "ALL" | "PENDING_SIGNATURE" | "ORANGE" | "RED";
 
@@ -88,6 +90,16 @@ const extractMiddleItinerary = (items: ItineraryItem[]): ItineraryItem[] => {
 const buildInsuranceAnnexNumber = (contractNumber: string) => {
   const sanitized = (contractNumber || "SIN-CONTRATO").replace(/\s+/g, "-").toUpperCase();
   return `ANX-SEG-${sanitized}`;
+};
+
+const buildExonerationAnnexNumber = (contractNumber: string, travelerName: string) => {
+  const contractPart = (contractNumber || "SIN-CONTRATO").replace(/\s+/g, "-").toUpperCase();
+  const travelerPart = (travelerName || "SIN-NOMBRE")
+    .replace(/[^a-zA-Z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .toUpperCase();
+  return `ANX-EXO-${contractPart}-${travelerPart}`;
 };
 
 const getDaysSince = (isoDate?: string | null) => {
@@ -173,6 +185,7 @@ export default function ContractsPage() {
   const [itineraryDraft, setItineraryDraft] = useState<ItineraryItem[]>([]);
   const [luggageDraft, setLuggageDraft] = useState("");
   const [annexStatusByMember, setAnnexStatusByMember] = useState<AnnexStatusByMember>({});
+  const [exonerationStatusByAnnex, setExonerationStatusByAnnex] = useState<ExonerationStatusByAnnex>({});
   const [workQueueFilter, setWorkQueueFilter] = useState<WorkQueueFilter>("ALL");
   const [workQueueQuery, setWorkQueueQuery] = useState("");
   const canViewClient = user.role === Role.ADMIN || user.role === Role.CONTRACTS;
@@ -449,6 +462,20 @@ export default function ContractsPage() {
     );
   };
 
+  const downloadExonerationPreview = async (
+    member: TripMember,
+    travelerName: string,
+    content: string,
+  ) => {
+    const safeMember = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
+    const safeTraveler = travelerName.trim().replace(/\s+/g, "-").toLowerCase() || "viajero";
+    await downloadPdfFromText(
+      `anexo-exoneracion-${safeMember}-${safeTraveler}`,
+      `Anexo exoneracion · ${travelerName}`,
+      content,
+    );
+  };
+
   const openDocumentsDialog = (memberId: string) => {
     setDocumentsOwnerFilter("ALL");
     setDocumentsDialog({ open: true, memberId });
@@ -496,6 +523,35 @@ export default function ContractsPage() {
     });
   };
 
+  const sendExonerationToSign = (annexNumber: string, trip?: Trip) => {
+    if (isAnnexPastCutoff(trip)) {
+      return;
+    }
+    setExonerationStatusByAnnex((prev) => ({
+      ...prev,
+      [annexNumber]: {
+        sentAt: prev[annexNumber]?.sentAt ?? new Date().toISOString(),
+        signedAt: prev[annexNumber]?.signedAt ?? null,
+      },
+    }));
+  };
+
+  const markExonerationSigned = (annexNumber: string, trip?: Trip) => {
+    if (isAnnexPastCutoff(trip)) {
+      return;
+    }
+    setExonerationStatusByAnnex((prev) => {
+      const sentAt = prev[annexNumber]?.sentAt ?? new Date().toISOString();
+      return {
+        ...prev,
+        [annexNumber]: {
+          sentAt,
+          signedAt: new Date().toISOString(),
+        },
+      };
+    });
+  };
+
   const previewMember = previewDialog.memberId
     ? items.find((item) => item.id === previewDialog.memberId) ?? null
     : null;
@@ -526,6 +582,46 @@ export default function ContractsPage() {
       })
     : null;
 
+  const annexTravelers = annexMember
+    ? [
+        {
+          travelerName: annexMember.fullName,
+          travelerRole: "Titular",
+          travelerIdType: toContractIdTypeLabel(annexMember.identificationTypeId),
+          travelerIdNumber: annexMember.identification,
+          emergencyContactName: annexMember.emergencyContactName,
+          emergencyContactPhone: annexMember.emergencyContactPhone,
+          wantsInsuranceWithLucitours: annexMember.wantsInsurance,
+          provider: insuranceById.get(annexMember.insuranceId) ?? "",
+          hasOwnInsurance: annexMember.hasOwnInsurance,
+        },
+        ...annexMember.companions.map((companion) => ({
+          travelerName: companion.fullName || "Acompanante",
+          travelerRole: companion.isMinor ? "Acompanante menor" : "Acompanante",
+          travelerIdType: toContractIdTypeLabel(
+            (companion as { identificationTypeId?: string }).identificationTypeId ??
+              annexMember.identificationTypeId,
+          ),
+          travelerIdNumber: companion.identification,
+          emergencyContactName: companion.emergencyContactName,
+          emergencyContactPhone: companion.emergencyContactPhone,
+          wantsInsuranceWithLucitours: companion.wantsInsurance,
+          provider: insuranceById.get(companion.insuranceId) ?? "",
+          hasOwnInsurance: companion.hasOwnInsurance,
+        })),
+      ]
+    : [];
+
+  const exonerationTravelers = annexTravelers.filter(
+    (traveler) =>
+      traveler.hasOwnInsurance === true || traveler.wantsInsuranceWithLucitours === false,
+  );
+
+  const insuranceAnnexTravelers = annexTravelers.filter(
+    (traveler) =>
+      traveler.wantsInsuranceWithLucitours === true && traveler.hasOwnInsurance !== true,
+  );
+
   const annexPreviewText = annexMember && annexDraft
     ? renderInsuranceAnnexPreview({
         contractNumber: annexDraft.payload.contract.number,
@@ -546,35 +642,39 @@ export default function ContractsPage() {
         lucitoursEdwinDate: annexDraft.payload.signatures.lucitoursEdwinDate,
         lucitoursErickDate: annexDraft.payload.signatures.lucitoursErickDate,
         clientDate: annexDraft.payload.signatures.clientDate,
-        travelers: [
-          {
-            travelerName: annexMember.fullName,
-            travelerRole: "Titular",
-            travelerIdType: toContractIdTypeLabel(annexMember.identificationTypeId),
-            travelerIdNumber: annexMember.identification,
-            emergencyContactName: annexMember.emergencyContactName,
-            emergencyContactPhone: annexMember.emergencyContactPhone,
-            wantsInsuranceWithLucitours: annexMember.wantsInsurance,
-            provider: insuranceById.get(annexMember.insuranceId) ?? "",
-            hasOwnInsurance: annexMember.hasOwnInsurance,
-          },
-          ...annexMember.companions.map((companion) => ({
-            travelerName: companion.fullName || "Acompanante",
-            travelerRole: companion.isMinor ? "Acompanante menor" : "Acompanante",
-            travelerIdType: toContractIdTypeLabel(
-              (companion as { identificationTypeId?: string }).identificationTypeId ??
-                annexMember.identificationTypeId,
-            ),
-            travelerIdNumber: companion.identification,
-            emergencyContactName: companion.emergencyContactName,
-            emergencyContactPhone: companion.emergencyContactPhone,
-            wantsInsuranceWithLucitours: companion.wantsInsurance,
-            provider: insuranceById.get(companion.insuranceId) ?? "",
-            hasOwnInsurance: companion.hasOwnInsurance,
-          })),
-        ],
+        travelers: insuranceAnnexTravelers,
       })
     : "";
+
+  const exonerationAnnexes = annexMember && annexDraft
+    ? exonerationTravelers
+        .map((traveler) => ({
+          ...traveler,
+          annexNumber: buildExonerationAnnexNumber(
+            annexDraft.payload.contract.number,
+            traveler.travelerName,
+          ),
+          previewText: renderInsuranceExonerationPreview({
+            contractNumber: annexDraft.payload.contract.number,
+            annexNumber: buildExonerationAnnexNumber(
+              annexDraft.payload.contract.number,
+              traveler.travelerName,
+            ),
+            tripDestination: annexDraft.payload.trip.destinationCountry,
+            tripStartDate: annexDraft.payload.trip.startDate,
+            tripEndDate: annexDraft.payload.trip.endDate,
+            clientFullName: annexMember.fullName,
+            travelerName: traveler.travelerName,
+            travelerRole: traveler.travelerRole,
+            travelerIdType: traveler.travelerIdType,
+            travelerIdNumber: traveler.travelerIdNumber,
+            emergencyContactName: traveler.emergencyContactName,
+            emergencyContactPhone: traveler.emergencyContactPhone,
+            hasOwnInsurance: traveler.hasOwnInsurance,
+            issuedAt: formatIsoDate(new Date().toISOString()),
+          }),
+        }))
+    : [];
 
   const documentOwnerOptions = useMemo(() => {
     if (!documentsMember) {
@@ -1207,6 +1307,95 @@ export default function ContractsPage() {
                     ))}
                 </div>
               </div>
+
+              {exonerationAnnexes.length > 0 ? (
+                <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-xs font-semibold text-amber-800">
+                    Anexos independientes de exoneracion requeridos ({exonerationAnnexes.length})
+                  </p>
+                  {exonerationAnnexes.map((annex) => (
+                    <div key={annex.annexNumber} className="rounded-md border border-amber-300 bg-white p-3">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-slate-800">
+                          {annex.travelerName} · {annex.annexNumber}
+                        </p>
+                        <span
+                          className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
+                            exonerationStatusByAnnex[annex.annexNumber]?.signedAt
+                              ? "bg-emerald-100 text-emerald-700"
+                              : exonerationStatusByAnnex[annex.annexNumber]?.sentAt
+                                ? "bg-sky-100 text-sky-700"
+                                : "bg-slate-100 text-slate-700"
+                          }`}
+                        >
+                          {exonerationStatusByAnnex[annex.annexNumber]?.signedAt
+                            ? "Firmado"
+                            : exonerationStatusByAnnex[annex.annexNumber]?.sentAt
+                              ? "Enviado"
+                              : "Borrador"}
+                        </span>
+                      </div>
+                      <div className="mb-2 flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => sendExonerationToSign(annex.annexNumber, annexTrip)}
+                          disabled={
+                            isAnnexPastCutoff(annexTrip) ||
+                            Boolean(exonerationStatusByAnnex[annex.annexNumber]?.sentAt)
+                          }
+                        >
+                          Enviar exoneracion a firma
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => markExonerationSigned(annex.annexNumber, annexTrip)}
+                          disabled={
+                            isAnnexPastCutoff(annexTrip) ||
+                            !exonerationStatusByAnnex[annex.annexNumber]?.sentAt ||
+                            Boolean(exonerationStatusByAnnex[annex.annexNumber]?.signedAt)
+                          }
+                        >
+                          Marcar exoneracion firmada
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            void downloadExonerationPreview(
+                              annexMember,
+                              annex.travelerName,
+                              annex.previewText,
+                            )
+                          }
+                          disabled={!exonerationStatusByAnnex[annex.annexNumber]?.sentAt}
+                          title={
+                            exonerationStatusByAnnex[annex.annexNumber]?.sentAt
+                              ? "Descargar PDF del anexo de exoneracion"
+                              : "Debes enviar la exoneracion a firma antes de descargar"
+                          }
+                        >
+                          Descargar exoneracion
+                        </Button>
+                      </div>
+                      <div className="max-h-40 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-2">
+                        <div className="font-mono text-[11px] leading-5 text-slate-800">
+                          {annex.previewText
+                            .split("\n")
+                            .map((line, idx) => (
+                              <div key={`${annex.annexNumber}-${idx}`} className="whitespace-pre-wrap">
+                                {line.length > 0 ? line : "\u00A0"}
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : (
             <p className="text-sm text-slate-600">No se pudo generar el anexo.</p>
