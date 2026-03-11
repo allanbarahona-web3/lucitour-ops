@@ -175,6 +175,11 @@ export interface DocumentUpload {
   ownerName: string;
   concept?: string;
   conceptOther?: string;
+  idIsValid?: boolean;
+  idSignatureMatches?: boolean;
+  passportIsValid?: boolean;
+  reviewedByUserId?: string;
+  reviewedAt?: string;
 }
 
 export interface Companion {
@@ -339,6 +344,14 @@ export interface TripMember {
   contractsTakenByUserId: string | null;
   contractsTakenAt: string | null;
   contractsStatusUpdatedAt: string | null;
+  signedContractFileName?: string | null;
+  signedContractUploadedAt?: string | null;
+  signedInsuranceAnnexFileName?: string | null;
+  signedInsuranceAnnexUploadedAt?: string | null;
+  signedExonerationAnnexFileName?: string | null;
+  signedExonerationAnnexUploadedAt?: string | null;
+  signedMinorAnnexFileName?: string | null;
+  signedMinorAnnexUploadedAt?: string | null;
   billingStatus: BillingStatus;
   billingSentByUserId: string | null;
   billingSentAt: string | null;

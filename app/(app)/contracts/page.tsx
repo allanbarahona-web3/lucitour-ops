@@ -13,7 +13,16 @@ import {
 import { getOpsRepo } from "@/lib/data/opsRepo";
 import { identificationTypes, insurances } from "@/lib/data/catalogs";
 import { useSession } from "@/lib/auth/sessionContext";
-import { ContractsWorkflowStatus, Role, type DocumentType, type Trip, type TripMember } from "@/lib/types/ops";
+import {
+  ContractsWorkflowStatus,
+  DocsStatus,
+  PassportStatus,
+  Role,
+  type DocumentType,
+  type DocumentUpload,
+  type Trip,
+  type TripMember,
+} from "@/lib/types/ops";
 import { mapTripMemberToContractDraft } from "@/lib/contracts/contractMapper";
 import { renderContractGeneralPreview } from "@/lib/contracts/renderContractTemplate";
 import { renderInsuranceAnnexPreview } from "@/lib/contracts/renderInsuranceAnnexTemplate";
@@ -52,6 +61,13 @@ const matchesOwnerFilter = (
     return isTitularOwnerName(ownerName, titularFullName);
   }
   return normalizeOwnerName(ownerName) === normalizeOwnerName(selectedOwner);
+};
+
+const belongsToOwner = (docOwnerName: string, ownerName: string, titularFullName: string) => {
+  if (ownerName === titularFullName) {
+    return isTitularOwnerName(docOwnerName, titularFullName);
+  }
+  return normalizeOwnerName(docOwnerName) === normalizeOwnerName(ownerName);
 };
 
 const ANNEX_CUTOFF_HOURS = 48;
@@ -234,6 +250,115 @@ export default function ContractsPage() {
     return "Cedula";
   };
 
+  const getTravelersForValidation = (member: TripMember) => [
+    {
+      ownerName: member.fullName,
+      idTypeLabel: toContractIdTypeLabel(member.identificationTypeId),
+    },
+    ...member.companions.map((companion) => ({
+      ownerName: companion.fullName || "Acompanante",
+      idTypeLabel: toContractIdTypeLabel(
+        (companion as { identificationTypeId?: string }).identificationTypeId ??
+          member.identificationTypeId,
+      ),
+    })),
+  ];
+
+  const getCedulaBlockingIssues = (member: TripMember) => {
+    const issues: string[] = [];
+    const travelers = getTravelersForValidation(member);
+
+    travelers.forEach((traveler) => {
+      if (traveler.idTypeLabel === "Pasaporte") {
+        return;
+      }
+
+      const idDoc = member.documents.find(
+        (doc) =>
+          doc.type === "ID_CARD" && belongsToOwner(doc.ownerName, traveler.ownerName, member.fullName),
+      );
+
+      if (!idDoc) {
+        issues.push(`${traveler.ownerName}: falta cedula/identificacion.`);
+        return;
+      }
+
+      if (idDoc.idIsValid !== true) {
+        issues.push(`${traveler.ownerName}: cedula vencida o no validada.`);
+      }
+
+      if (idDoc.idSignatureMatches !== true) {
+        issues.push(`${traveler.ownerName}: firma de cedula no coincide o no validada.`);
+      }
+    });
+
+    return issues;
+  };
+
+  const getPassportPendingItems = (member: TripMember) => {
+    const pending: string[] = [];
+    const travelers = getTravelersForValidation(member);
+
+    travelers.forEach((traveler) => {
+      const passportDoc = member.documents.find(
+        (doc) =>
+          doc.type === "PASSPORT" && belongsToOwner(doc.ownerName, traveler.ownerName, member.fullName),
+      );
+
+      if (!passportDoc) {
+        pending.push(`${traveler.ownerName}: pasaporte pendiente.`);
+        return;
+      }
+
+      if (passportDoc.passportIsValid !== true) {
+        pending.push(`${traveler.ownerName}: pasaporte vencido/no validado.`);
+      }
+    });
+
+    return pending;
+  };
+
+  const getAnnexRequirements = (member: TripMember) => {
+    const travelerInsuranceFlags = [
+      {
+        wantsInsuranceWithLucitours: member.wantsInsurance,
+        hasOwnInsurance: member.hasOwnInsurance,
+      },
+      ...member.companions.map((companion) => ({
+        wantsInsuranceWithLucitours: companion.wantsInsurance,
+        hasOwnInsurance: companion.hasOwnInsurance,
+      })),
+    ];
+
+    const requiresInsuranceAnnex = travelerInsuranceFlags.some(
+      (traveler) =>
+        traveler.wantsInsuranceWithLucitours === true && traveler.hasOwnInsurance !== true,
+    );
+    const requiresExonerationAnnex = travelerInsuranceFlags.some(
+      (traveler) =>
+        traveler.hasOwnInsurance === true || traveler.wantsInsuranceWithLucitours === false,
+    );
+    const requiresMinorAnnex = member.companions.some((companion) => companion.isMinor);
+
+    const missingUploadLabels: string[] = [];
+    if (requiresInsuranceAnnex && !member.signedInsuranceAnnexFileName) {
+      missingUploadLabels.push("Anexo de seguro firmado");
+    }
+    if (requiresExonerationAnnex && !member.signedExonerationAnnexFileName) {
+      missingUploadLabels.push("Anexo de exoneracion firmado");
+    }
+    if (requiresMinorAnnex && !member.signedMinorAnnexFileName) {
+      missingUploadLabels.push("Anexo de menor firmado");
+    }
+
+    return {
+      requiresInsuranceAnnex,
+      requiresExonerationAnnex,
+      requiresMinorAnnex,
+      missingUploadLabels,
+    };
+  };
+
   const userById = useMemo(() => {
     const map = new Map<string, string>();
     users.forEach((user) => map.set(user.id, user.name));
@@ -281,6 +406,30 @@ export default function ContractsPage() {
   };
 
   const handleStatusChange = async (member: TripMember, status: ContractsWorkflowStatus) => {
+    if (status === ContractsWorkflowStatus.SENT_TO_SIGN) {
+      const blockingIssues = getCedulaBlockingIssues(member);
+      if (blockingIssues.length > 0) {
+        window.alert(
+          `No se puede enviar a firma hasta validar cedulas.\n\n${blockingIssues.join("\n")}`,
+        );
+        return;
+      }
+    }
+
+    if (status === ContractsWorkflowStatus.APPROVED) {
+      const missingCloseRequirements: string[] = [];
+      if (!member.signedContractFileName) {
+        missingCloseRequirements.push("Contrato firmado cargado");
+      }
+      missingCloseRequirements.push(...getAnnexRequirements(member).missingUploadLabels);
+      if (missingCloseRequirements.length > 0) {
+        window.alert(
+          `No se puede cerrar contrato hasta cargar firmados requeridos.\n\n${missingCloseRequirements.join("\n")}`,
+        );
+        return;
+      }
+    }
+
     setBusyId(member.id);
     const now = new Date().toISOString();
     const optimistic: TripMember = {
@@ -305,6 +454,84 @@ export default function ContractsPage() {
       setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
     }
     setBusyId(null);
+  };
+
+  const uploadSignedFile = async (
+    member: TripMember,
+    patch: Partial<TripMember>,
+  ) => {
+    const now = new Date().toISOString();
+    const optimistic: TripMember = {
+      ...member,
+      ...patch,
+      updatedAt: now,
+    };
+
+    setItems((prev) => prev.map((item) => (item.id === member.id ? optimistic : item)));
+
+    const updated = await repo.updateTripMember(member.tripId, member.id, {
+      ...patch,
+      updatedAt: now,
+    });
+
+    if (updated) {
+      setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+    }
+  };
+
+  const updateDocumentReview = async (
+    member: TripMember,
+    documentId: string,
+    patch: Partial<DocumentUpload>,
+  ) => {
+    const now = new Date().toISOString();
+    const nextDocuments = member.documents.map((doc) =>
+      doc.id === documentId
+        ? {
+            ...doc,
+            ...patch,
+            reviewedByUserId: user.id,
+            reviewedAt: now,
+          }
+        : doc,
+    );
+
+    const nextPassportStatus = nextDocuments.some(
+      (doc) => doc.type === "PASSPORT" && doc.passportIsValid === true,
+    )
+      ? PassportStatus.ENTERED
+      : PassportStatus.NOT_ENTERED;
+
+    const nextDocsStatus = nextDocuments.length > 0 ? DocsStatus.UPLOADED : DocsStatus.NOT_UPLOADED;
+
+    const optimistic: TripMember = {
+      ...member,
+      documents: nextDocuments,
+      passportStatus: nextPassportStatus,
+      docsStatus: nextDocsStatus,
+      contractsWorkflowStatus:
+        member.contractsWorkflowStatus === ContractsWorkflowStatus.SENT_TO_SIGN &&
+        getCedulaBlockingIssues({ ...member, documents: nextDocuments }).length > 0
+          ? ContractsWorkflowStatus.INFO_PENDING
+          : member.contractsWorkflowStatus,
+      contractsStatusUpdatedAt: now,
+      updatedAt: now,
+    };
+
+    setItems((prev) => prev.map((item) => (item.id === member.id ? optimistic : item)));
+
+    const updated = await repo.updateTripMember(member.tripId, member.id, {
+      documents: nextDocuments,
+      passportStatus: nextPassportStatus,
+      docsStatus: nextDocsStatus,
+      contractsWorkflowStatus: optimistic.contractsWorkflowStatus,
+      contractsStatusUpdatedAt: now,
+      updatedAt: now,
+    });
+
+    if (updated) {
+      setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+    }
   };
 
   const openItineraryDialog = (member: TripMember) => {
@@ -645,6 +872,22 @@ export default function ContractsPage() {
       })
     : null;
   const previewContractText = previewDraft ? renderContractGeneralPreview(previewDraft.payload) : "";
+  const previewCedulaIssues = previewMember ? getCedulaBlockingIssues(previewMember) : [];
+  const previewPassportPending = previewMember ? getPassportPendingItems(previewMember) : [];
+  const previewAnnexRequirements = previewMember
+    ? getAnnexRequirements(previewMember)
+    : {
+        requiresInsuranceAnnex: false,
+        requiresExonerationAnnex: false,
+        requiresMinorAnnex: false,
+        missingUploadLabels: [] as string[],
+      };
+  const previewMissingCloseRequirements = previewMember
+    ? [
+        ...(previewMember.signedContractFileName ? [] : ["Contrato firmado cargado"]),
+        ...previewAnnexRequirements.missingUploadLabels,
+      ]
+    : [];
 
   const annexMember = annexDialog.memberId
     ? items.find((item) => item.id === annexDialog.memberId) ?? null
@@ -1090,6 +1333,8 @@ export default function ContractsPage() {
                     traveler.hasOwnInsurance === true || traveler.wantsInsuranceWithLucitours === false,
                 );
                 const hasMinorPermitAnnex = member.companions.some((companion) => companion.isMinor);
+                const cedulaBlockingIssues = getCedulaBlockingIssues(member);
+                const passportPendingItems = getPassportPendingItems(member);
                 const annexStatusLabel = !hasInsuranceAnnex
                   ? "No aplica"
                   : annexState?.signedAt
@@ -1168,6 +1413,16 @@ export default function ContractsPage() {
                         <span className="text-[11px] text-slate-500">
                           Estado firma: {getWorkflowStatusLabel(member.contractsWorkflowStatus)}
                         </span>
+                        {cedulaBlockingIssues.length > 0 ? (
+                          <span className="text-[11px] font-semibold text-rose-700">
+                            Pendiente cedula ({cedulaBlockingIssues.length})
+                          </span>
+                        ) : null}
+                        {passportPendingItems.length > 0 ? (
+                          <span className="text-[11px] font-semibold text-amber-700">
+                            Pendiente pasaporte ({passportPendingItems.length})
+                          </span>
+                        ) : null}
                       </div>
                     </td>
                     <td className="px-3 py-2 text-slate-600">
@@ -1386,6 +1641,69 @@ export default function ContractsPage() {
                 </div>
               )}
 
+              {previewCedulaIssues.length > 0 ? (
+                <div className="rounded-md border border-rose-300 bg-rose-50 p-3 text-xs text-rose-800">
+                  <p className="font-semibold">Bloqueo por cedula antes de firma:</p>
+                  <ul className="mt-2 list-disc pl-4">
+                    {previewCedulaIssues.map((issue) => (
+                      <li key={issue}>{issue}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {previewPassportPending.length > 0 ? (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+                  Pasaporte pendiente ({previewPassportPending.length}). No bloquea firma de contrato,
+                  pero debe resolverse antes de pasar a Compras.
+                </div>
+              ) : null}
+
+              {previewMember ? (
+                <div className="rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-700">
+                  <p className="font-semibold text-slate-800">Contrato firmado (archivo recibido)</p>
+                  <p>
+                    Archivo actual: <span className="font-semibold">{previewMember.signedContractFileName || "-"}</span>
+                  </p>
+                  <p>
+                    Fecha carga: <span className="font-semibold">{formatDateTime(previewMember.signedContractUploadedAt)}</span>
+                  </p>
+                  <label className="mt-2 inline-flex cursor-pointer items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                    Cargar contrato firmado
+                    <input
+                      type="file"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) {
+                          return;
+                        }
+                        void uploadSignedFile(previewMember, {
+                          signedContractFileName: file.name,
+                          signedContractUploadedAt: new Date().toISOString(),
+                        });
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+              ) : null}
+
+              {previewMissingCloseRequirements.length > 0 ? (
+                <div className="rounded-md border border-rose-300 bg-rose-50 p-3 text-xs text-rose-800">
+                  <p className="font-semibold">Pendientes para cerrar contrato:</p>
+                  <ul className="mt-2 list-disc pl-4">
+                    {previewMissingCloseRequirements.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">
+                  Requisitos de cierre completos (contrato y anexos firmados cargados).
+                </div>
+              )}
+
               <div className="rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-700">
                 Estado actual: <span className="font-semibold">{getWorkflowStatusLabel(previewMember?.contractsWorkflowStatus)}</span>
               </div>
@@ -1442,6 +1760,7 @@ export default function ContractsPage() {
                   }
                   disabled={
                     previewDraft.missingFields.length > 0 ||
+                    previewCedulaIssues.length > 0 ||
                     previewMember.contractsWorkflowStatus === ContractsWorkflowStatus.SENT_TO_SIGN ||
                     previewMember.contractsWorkflowStatus === ContractsWorkflowStatus.APPROVED ||
                     busyId === previewMember.id
@@ -1456,6 +1775,7 @@ export default function ContractsPage() {
                   }
                   disabled={
                     previewMember.contractsWorkflowStatus !== ContractsWorkflowStatus.SENT_TO_SIGN ||
+                    previewMissingCloseRequirements.length > 0 ||
                     busyId === previewMember.id
                   }
                 >
@@ -1497,6 +1817,27 @@ export default function ContractsPage() {
                 <p>
                   Enviado a firma: <span className="font-semibold">{formatDateTime(annexStatusByMember[annexMember.id]?.sentAt)}</span>
                 </p>
+                <p>
+                  Anexo firmado cargado: <span className="font-semibold">{annexMember.signedInsuranceAnnexFileName || "-"}</span>
+                </p>
+                <label className="mt-2 inline-flex cursor-pointer items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                  Cargar anexo seguro firmado
+                  <input
+                    type="file"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) {
+                        return;
+                      }
+                      void uploadSignedFile(annexMember, {
+                        signedInsuranceAnnexFileName: file.name,
+                        signedInsuranceAnnexUploadedAt: new Date().toISOString(),
+                      });
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
               </div>
 
               {insuranceAnnexTravelers.length > 0 ? (
@@ -1598,6 +1939,29 @@ export default function ContractsPage() {
 
               {exonerationAnnexes.length > 0 ? (
                 <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+                  <div className="rounded-md border border-amber-300 bg-white p-2 text-xs text-slate-700">
+                    <p>
+                      Archivo de exoneracion firmado: <span className="font-semibold">{exonerationMember.signedExonerationAnnexFileName || "-"}</span>
+                    </p>
+                    <label className="mt-2 inline-flex cursor-pointer items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                      Cargar exoneracion firmada
+                      <input
+                        type="file"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (!file) {
+                            return;
+                          }
+                          void uploadSignedFile(exonerationMember, {
+                            signedExonerationAnnexFileName: file.name,
+                            signedExonerationAnnexUploadedAt: new Date().toISOString(),
+                          });
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
                   <p className="text-xs font-semibold text-amber-800">
                     Exoneraciones requeridas ({exonerationAnnexes.length})
                   </p>
@@ -1728,6 +2092,29 @@ export default function ContractsPage() {
 
               {minorPermitAnnexes.length > 0 ? (
                 <div className="space-y-2 rounded-md border border-cyan-200 bg-cyan-50 p-3">
+                  <div className="rounded-md border border-cyan-300 bg-white p-2 text-xs text-slate-700">
+                    <p>
+                      Archivo de anexo menor firmado: <span className="font-semibold">{minorPermitMember.signedMinorAnnexFileName || "-"}</span>
+                    </p>
+                    <label className="mt-2 inline-flex cursor-pointer items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                      Cargar anexo menor firmado
+                      <input
+                        type="file"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (!file) {
+                            return;
+                          }
+                          void uploadSignedFile(minorPermitMember, {
+                            signedMinorAnnexFileName: file.name,
+                            signedMinorAnnexUploadedAt: new Date().toISOString(),
+                          });
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
                   <p className="text-xs font-semibold text-cyan-800">
                     Anexos de menor requeridos ({minorPermitAnnexes.length})
                   </p>
@@ -1922,6 +2309,83 @@ export default function ContractsPage() {
                       <p className="text-slate-700">Corresponde a: {doc.ownerName || "-"}</p>
                       {doc.concept ? <p className="text-slate-600">Concepto: {doc.concept}</p> : null}
                       {doc.conceptOther ? <p className="text-slate-600">Detalle: {doc.conceptOther}</p> : null}
+                      {doc.type === "ID_CARD" ? (
+                        <div className="mt-2 space-y-2 rounded-md border border-rose-200 bg-rose-50 p-2">
+                          <p className="text-[11px] font-semibold text-rose-700">
+                            Validacion de cedula (bloquea envio a firma)
+                          </p>
+                          <label className="flex items-center gap-2 text-[11px] text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={doc.idIsValid === true}
+                              onChange={(event) =>
+                                void updateDocumentReview(documentsMember, doc.id, {
+                                  idIsValid: event.target.checked,
+                                })
+                              }
+                            />
+                            Cedula vigente
+                          </label>
+                          <label className="flex items-center gap-2 text-[11px] text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={doc.idSignatureMatches === true}
+                              onChange={(event) =>
+                                void updateDocumentReview(documentsMember, doc.id, {
+                                  idSignatureMatches: event.target.checked,
+                                })
+                              }
+                            />
+                            Firma coincide
+                          </label>
+                        </div>
+                      ) : null}
+
+                      {doc.type === "PASSPORT" ? (
+                        <div className="mt-2 space-y-2 rounded-md border border-amber-200 bg-amber-50 p-2">
+                          <p className="text-[11px] font-semibold text-amber-700">
+                            Estado de pasaporte (no bloquea contrato, bloquea paso a Compras)
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className={`rounded-md border px-2 py-1 text-[11px] font-semibold ${
+                                doc.passportIsValid === true
+                                  ? "border-emerald-300 bg-emerald-100 text-emerald-700"
+                                  : "border-slate-300 bg-white text-slate-700"
+                              }`}
+                              onClick={() =>
+                                void updateDocumentReview(documentsMember, doc.id, {
+                                  passportIsValid: true,
+                                })
+                              }
+                            >
+                              Marcar vigente
+                            </button>
+                            <button
+                              type="button"
+                              className={`rounded-md border px-2 py-1 text-[11px] font-semibold ${
+                                doc.passportIsValid === false
+                                  ? "border-amber-300 bg-amber-100 text-amber-700"
+                                  : "border-slate-300 bg-white text-slate-700"
+                              }`}
+                              onClick={() =>
+                                void updateDocumentReview(documentsMember, doc.id, {
+                                  passportIsValid: false,
+                                })
+                              }
+                            >
+                              Marcar vencido
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {doc.reviewedAt ? (
+                        <p className="mt-2 text-[11px] text-slate-500">
+                          Revisado: {formatDateTime(doc.reviewedAt)}
+                        </p>
+                      ) : null}
                     </div>
                   ))}
                 </div>

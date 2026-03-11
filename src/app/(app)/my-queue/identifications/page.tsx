@@ -18,6 +18,10 @@ const getIdDocs = (member: TripMember) =>
     (doc) => doc.type === "ID_CARD" || doc.type === "PASSPORT",
   );
 
+const hasPassportPending = (member: TripMember) =>
+  member.passportStatus === PassportStatus.NOT_ENTERED ||
+  member.documents.some((doc) => doc.type === "PASSPORT" && doc.passportIsValid === false);
+
 export default function MyQueueIdentificationsPage() {
   const repo = useMemo(() => getOpsRepo(), []);
   const { user } = useSession();
@@ -39,7 +43,7 @@ export default function MyQueueIdentificationsPage() {
       const nextRows = queueMembers
         .filter(
           (member) =>
-            member.passportStatus === PassportStatus.NOT_ENTERED ||
+            hasPassportPending(member) ||
             member.docsStatus === DocsStatus.NOT_UPLOADED,
         )
         .map((member) => ({
@@ -74,8 +78,8 @@ export default function MyQueueIdentificationsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Identificaciones</h1>
-          <p className="text-sm text-slate-600">Cedulas y pasaportes pendientes.</p>
+          <h1 className="text-2xl font-semibold text-slate-900">Pendientes de identificacion</h1>
+          <p className="text-sm text-slate-600">Seguimiento de cedulas y pasaportes para habilitar compras.</p>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <input
@@ -127,6 +131,9 @@ export default function MyQueueIdentificationsPage() {
                               className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5"
                             >
                               {doc.type === "PASSPORT" ? "Pasaporte" : "Cedula"} · {doc.fileName}
+                              {doc.type === "PASSPORT" && doc.passportIsValid === false
+                                ? " (vencido)"
+                                : ""}
                             </span>
                           ))}
                         </div>

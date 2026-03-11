@@ -40,6 +40,11 @@ const navItems = [
   },
   { href: "/contracts", label: "Contratos", roles: ["ADMIN", "CONTRACTS"] as Role[] },
   {
+    href: "/my-queue/identifications",
+    label: "Pendientes pasaporte",
+    roles: ["ADMIN", "CONTRACTS", "PURCHASES"] as Role[],
+  },
+  {
     href: "/contracts/modifications",
     label: "Modificaciones",
     roles: ["ADMIN", "CONTRACTS"] as Role[],
