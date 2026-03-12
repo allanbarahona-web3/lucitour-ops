@@ -34,7 +34,23 @@ export async function POST(request: Request) {
     );
   }
 
-  const fromEmail = process.env.CONTRACTS_FROM_EMAIL || "onboarding@resend.dev";
+  const fromEmailRaw = process.env.CONTRACTS_FROM_EMAIL?.trim();
+  if (!fromEmailRaw) {
+    return NextResponse.json(
+      { error: "Falta CONTRACTS_FROM_EMAIL en variables de entorno." },
+      { status: 503 },
+    );
+  }
+
+  const fromEmailValidation = z.string().email().safeParse(fromEmailRaw);
+  if (!fromEmailValidation.success) {
+    return NextResponse.json(
+      { error: "CONTRACTS_FROM_EMAIL no tiene un formato de correo valido." },
+      { status: 503 },
+    );
+  }
+
+  const fromEmail = fromEmailValidation.data;
   const resend = new Resend(resendApiKey);
 
   try {
