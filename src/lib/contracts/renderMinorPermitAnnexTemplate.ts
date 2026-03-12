@@ -1,3 +1,5 @@
+import { renderBrandedDocumentHtml } from "@/lib/contracts/renderDocumentHtml";
+
 export interface MinorPermitAnnexPayload {
   contractNumber: string;
   annexNumber: string;
@@ -62,3 +64,10 @@ export const renderMinorPermitAnnexPreview = (
 
   return lines.join("\n").trim();
 };
+
+export const renderMinorPermitAnnexPreviewHtml = (
+  payload: MinorPermitAnnexPayload,
+): string =>
+  renderBrandedDocumentHtml({
+    bodyText: renderMinorPermitAnnexPreview(payload),
+  });

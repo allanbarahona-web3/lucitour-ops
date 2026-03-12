@@ -24,10 +24,22 @@ import {
   type TripMember,
 } from "@/lib/types/ops";
 import { mapTripMemberToContractDraft } from "@/lib/contracts/contractMapper";
-import { renderContractGeneralPreview } from "@/lib/contracts/renderContractTemplate";
-import { renderInsuranceAnnexPreview } from "@/lib/contracts/renderInsuranceAnnexTemplate";
-import { renderInsuranceExonerationPreview } from "@/lib/contracts/renderInsuranceExonerationTemplate";
-import { renderMinorPermitAnnexPreview } from "@/lib/contracts/renderMinorPermitAnnexTemplate";
+import {
+  renderContractGeneralPreview,
+  renderContractGeneralPreviewHtml,
+} from "@/lib/contracts/renderContractTemplate";
+import {
+  renderInsuranceAnnexPreview,
+  renderInsuranceAnnexPreviewHtml,
+} from "@/lib/contracts/renderInsuranceAnnexTemplate";
+import {
+  renderInsuranceExonerationPreview,
+  renderInsuranceExonerationPreviewHtml,
+} from "@/lib/contracts/renderInsuranceExonerationTemplate";
+import {
+  renderMinorPermitAnnexPreview,
+  renderMinorPermitAnnexPreviewHtml,
+} from "@/lib/contracts/renderMinorPermitAnnexTemplate";
 
 type ItineraryItem = { date: string; activity: string };
 type LucitoursSigner = "none" | "edwin" | "erick" | "both";
@@ -71,11 +83,6 @@ const belongsToOwner = (docOwnerName: string, ownerName: string, titularFullName
 };
 
 const ANNEX_CUTOFF_HOURS = 48;
-
-const isClauseHeading = (line: string) =>
-  /^(CLAUSULAS|PRIMERO:|SEGUNDO:|TERCERO:|CUARTO:|QUINTO:|SEXTO:|SETIMO:|OCTAVO:|NOVENO:|DECIMO:|DECIMO PRIMERO:|DECIMO SEGUNDO:|DECIMO TERCERO:|DECIMO CUARTO:|DECIMO QUINTO:|DECIMO SEXTO:|DECIMO SETIMO:|DECIMO OCTAVO:|DECIMO NOVENO:|VIGESIMO:|VIGESIMO PRIMERO:|VIGESIMO SEGUNDO:|FIRMAS)$/.test(
-    line.trim(),
-  );
 
 const OUTBOUND_ACTIVITY = "Vuelo de ida al destino.";
 const RETURN_ACTIVITY = "Vuelo de vuelta al pais de origen.";
@@ -223,6 +230,7 @@ export default function ContractsPage() {
   const [annexStatusByMember, setAnnexStatusByMember] = useState<AnnexStatusByMember>({});
   const [exonerationStatusByAnnex, setExonerationStatusByAnnex] = useState<ExonerationStatusByAnnex>({});
   const [minorPermitStatusByAnnex, setMinorPermitStatusByAnnex] = useState<MinorPermitStatusByAnnex>({});
+  const [emailBusyKey, setEmailBusyKey] = useState<string | null>(null);
   const [workQueueFilter, setWorkQueueFilter] = useState<WorkQueueFilter>("ALL");
   const [workQueueQuery, setWorkQueueQuery] = useState("");
   const canViewClient = user.role === Role.ADMIN || user.role === Role.CONTRACTS;
@@ -656,9 +664,9 @@ export default function ContractsPage() {
     setPreviewDialog({ open: false, memberId: null });
   };
 
-  const downloadPdfFromText = async (fileBaseName: string, title: string, content: string) => {
+  const buildPdfFromText = async (title: string, content: string): Promise<Uint8Array | null> => {
     if (!content.trim()) {
-      return;
+      return null;
     }
 
     const { jsPDF } = await import("jspdf");
@@ -689,25 +697,157 @@ export default function ContractsPage() {
       y += lineHeight;
     });
 
-    pdf.save(`${fileBaseName}.pdf`);
+    return new Uint8Array(pdf.output("arraybuffer"));
+  };
+
+  const bytesToBase64 = (bytes: Uint8Array): string => {
+    const chunkSize = 0x8000;
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+  };
+
+  const downloadPdfDocument = (fileBaseName: string, pdfBytes: Uint8Array) => {
+    const normalized = Uint8Array.from(pdfBytes);
+    const blob = new Blob([normalized.buffer], { type: "application/pdf" });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `${fileBaseName}.pdf`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  };
+
+  const downloadHtmlDocument = (fileBaseName: string, html: string) => {
+    if (!html.trim()) {
+      return;
+    }
+
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `${fileBaseName}.html`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  };
+
+  const openPrintableDocument = (html: string) => {
+    if (!html.trim()) {
+      return;
+    }
+
+    const popup = window.open("", "_blank", "noopener,noreferrer");
+    if (!popup) {
+      return;
+    }
+
+    popup.document.open();
+    popup.document.write(html);
+    popup.document.close();
+    popup.focus();
+  };
+
+  const sendPdfByEmail = async (
+    member: TripMember,
+    params: {
+      busyKey: string;
+      subject: string;
+      messageText: string;
+      fileName: string;
+      pdfBytes: Uint8Array;
+    },
+  ) => {
+    if (!member.email?.trim()) {
+      window.alert("Este cliente no tiene correo registrado.");
+      return;
+    }
+
+    setEmailBusyKey(params.busyKey);
+    try {
+      const response = await fetch("/api/contracts/send-pdf", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          to: member.email.trim(),
+          subject: params.subject,
+          messageText: params.messageText,
+          fileName: params.fileName,
+          pdfBase64: bytesToBase64(params.pdfBytes),
+        }),
+      });
+
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) {
+        window.alert(data?.error || "No se pudo enviar el correo.");
+        return;
+      }
+
+      window.alert(`PDF enviado por correo a ${member.email}.`);
+    } catch {
+      window.alert("Error inesperado enviando el correo.");
+    } finally {
+      setEmailBusyKey(null);
+    }
   };
 
   const downloadContractPreview = async (member: TripMember, content: string) => {
     const safeName = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
-    await downloadPdfFromText(
-      `contrato-${safeName}`,
-      `Contrato · ${member.fullName}`,
-      content,
-    );
+    const pdfBytes = await buildPdfFromText(`Contrato · ${member.fullName}`, content);
+    if (!pdfBytes) {
+      return;
+    }
+    downloadPdfDocument(`contrato-${safeName}`, pdfBytes);
+  };
+
+  const emailContractPreview = async (member: TripMember, content: string) => {
+    const safeName = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
+    const pdfBytes = await buildPdfFromText(`Contrato · ${member.fullName}`, content);
+    if (!pdfBytes) {
+      return;
+    }
+    await sendPdfByEmail(member, {
+      busyKey: `contract:${member.id}`,
+      subject: `Contrato para firma · ${member.fullName}`,
+      messageText:
+        "Adjuntamos su contrato en PDF para que pueda revisarlo, firmarlo y devolverlo por este mismo medio.",
+      fileName: `contrato-${safeName}.pdf`,
+      pdfBytes,
+    });
   };
 
   const downloadAnnexPreview = async (member: TripMember, content: string) => {
     const safeName = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
-    await downloadPdfFromText(
-      `anexo-seguro-${safeName}`,
-      `Anexo de seguro · ${member.fullName}`,
-      content,
-    );
+    const pdfBytes = await buildPdfFromText(`Anexo de seguro · ${member.fullName}`, content);
+    if (!pdfBytes) {
+      return;
+    }
+    downloadPdfDocument(`anexo-seguro-${safeName}`, pdfBytes);
+  };
+
+  const emailAnnexPreview = async (member: TripMember, content: string) => {
+    const safeName = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
+    const pdfBytes = await buildPdfFromText(`Anexo de seguro · ${member.fullName}`, content);
+    if (!pdfBytes) {
+      return;
+    }
+    await sendPdfByEmail(member, {
+      busyKey: `annex:${member.id}`,
+      subject: `Anexo de seguro para firma · ${member.fullName}`,
+      messageText:
+        "Adjuntamos el anexo de seguro en PDF para firma y devolucion.",
+      fileName: `anexo-seguro-${safeName}.pdf`,
+      pdfBytes,
+    });
   };
 
   const downloadExonerationPreview = async (
@@ -717,11 +857,33 @@ export default function ContractsPage() {
   ) => {
     const safeMember = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
     const safeTraveler = travelerName.trim().replace(/\s+/g, "-").toLowerCase() || "viajero";
-    await downloadPdfFromText(
-      `anexo-exoneracion-${safeMember}-${safeTraveler}`,
-      `Anexo exoneracion · ${travelerName}`,
-      content,
-    );
+    const pdfBytes = await buildPdfFromText(`Anexo exoneracion · ${travelerName}`, content);
+    if (!pdfBytes) {
+      return;
+    }
+    downloadPdfDocument(`anexo-exoneracion-${safeMember}-${safeTraveler}`, pdfBytes);
+  };
+
+  const emailExonerationPreview = async (
+    member: TripMember,
+    annexNumber: string,
+    travelerName: string,
+    content: string,
+  ) => {
+    const safeMember = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
+    const safeTraveler = travelerName.trim().replace(/\s+/g, "-").toLowerCase() || "viajero";
+    const pdfBytes = await buildPdfFromText(`Anexo exoneracion · ${travelerName}`, content);
+    if (!pdfBytes) {
+      return;
+    }
+    await sendPdfByEmail(member, {
+      busyKey: `exoneration:${annexNumber}`,
+      subject: `Anexo de exoneracion para firma · ${travelerName}`,
+      messageText:
+        "Adjuntamos el anexo de exoneracion en PDF para firma y devolucion.",
+      fileName: `anexo-exoneracion-${safeMember}-${safeTraveler}.pdf`,
+      pdfBytes,
+    });
   };
 
   const downloadMinorPermitPreview = async (
@@ -731,11 +893,33 @@ export default function ContractsPage() {
   ) => {
     const safeMember = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
     const safeMinor = minorName.trim().replace(/\s+/g, "-").toLowerCase() || "menor";
-    await downloadPdfFromText(
-      `anexo-menor-${safeMember}-${safeMinor}`,
-      `Anexo autorizacion menor · ${minorName}`,
-      content,
-    );
+    const pdfBytes = await buildPdfFromText(`Anexo autorizacion menor · ${minorName}`, content);
+    if (!pdfBytes) {
+      return;
+    }
+    downloadPdfDocument(`anexo-menor-${safeMember}-${safeMinor}`, pdfBytes);
+  };
+
+  const emailMinorPermitPreview = async (
+    member: TripMember,
+    annexNumber: string,
+    minorName: string,
+    content: string,
+  ) => {
+    const safeMember = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
+    const safeMinor = minorName.trim().replace(/\s+/g, "-").toLowerCase() || "menor";
+    const pdfBytes = await buildPdfFromText(`Anexo autorizacion menor · ${minorName}`, content);
+    if (!pdfBytes) {
+      return;
+    }
+    await sendPdfByEmail(member, {
+      busyKey: `minor:${annexNumber}`,
+      subject: `Anexo de menor para firma · ${minorName}`,
+      messageText:
+        "Adjuntamos el anexo de autorizacion de menor en PDF para firma y devolucion.",
+      fileName: `anexo-menor-${safeMember}-${safeMinor}.pdf`,
+      pdfBytes,
+    });
   };
 
   const openDocumentsDialog = (memberId: string) => {
@@ -871,7 +1055,12 @@ export default function ContractsPage() {
         lucitoursSignatories: signerFlags(signerByMember[previewMember.id] ?? "none"),
       })
     : null;
-  const previewContractText = previewDraft ? renderContractGeneralPreview(previewDraft.payload) : "";
+  const previewContractText = previewDraft
+    ? renderContractGeneralPreview(previewDraft.payload)
+    : "";
+  const previewContractHtml = previewDraft
+    ? renderContractGeneralPreviewHtml(previewDraft.payload)
+    : "";
   const previewCedulaIssues = previewMember ? getCedulaBlockingIssues(previewMember) : [];
   const previewPassportPending = previewMember ? getPassportPendingItems(previewMember) : [];
   const previewAnnexRequirements = previewMember
@@ -966,6 +1155,29 @@ export default function ContractsPage() {
       traveler.wantsInsuranceWithLucitours === true && traveler.hasOwnInsurance !== true,
   );
 
+  const annexPreviewHtml = annexMember && annexDraft && insuranceAnnexTravelers.length > 0
+    ? renderInsuranceAnnexPreviewHtml({
+        contractNumber: annexDraft.payload.contract.number,
+        annexNumber: buildInsuranceAnnexNumber(annexDraft.payload.contract.number),
+        clientFullName: annexMember.fullName,
+        clientIdType: toContractIdTypeLabel(annexMember.identificationTypeId),
+        clientIdNumber: annexMember.identification,
+        tripDestination: annexDraft.payload.trip.destinationCountry,
+        tripStartDate: annexDraft.payload.trip.startDate,
+        tripEndDate: annexDraft.payload.trip.endDate,
+        annexIssuedAt: formatIsoDate(new Date().toISOString()),
+        annexSentAt: annexStatusByMember[annexMember.id]?.sentAt
+          ? formatDateTime(annexStatusByMember[annexMember.id]?.sentAt)
+          : "",
+        annexCutoffAt: formatIsoDate(getAnnexCutoffAt(annexTrip)),
+        includeEdwin: annexDraft.payload.lucitours.signatories.includeEdwin,
+        includeErick: annexDraft.payload.lucitours.signatories.includeErick,
+        lucitoursEdwinDate: annexDraft.payload.signatures.lucitoursEdwinDate,
+        lucitoursErickDate: annexDraft.payload.signatures.lucitoursErickDate,
+        clientDate: annexDraft.payload.signatures.clientDate,
+        travelers: insuranceAnnexTravelers,
+      })
+    : "";
   const annexPreviewText = annexMember && annexDraft && insuranceAnnexTravelers.length > 0
     ? renderInsuranceAnnexPreview({
         contractNumber: annexDraft.payload.contract.number,
@@ -1005,6 +1217,29 @@ export default function ContractsPage() {
             exonerationDraft.payload.contract.number,
             traveler.travelerName,
           ),
+          previewHtml: renderInsuranceExonerationPreviewHtml({
+            contractNumber: exonerationDraft.payload.contract.number,
+            annexNumber: buildExonerationAnnexNumber(
+              exonerationDraft.payload.contract.number,
+              traveler.travelerName,
+            ),
+            tripDestination: exonerationDraft.payload.trip.destinationCountry,
+            tripStartDate: exonerationDraft.payload.trip.startDate,
+            tripEndDate: exonerationDraft.payload.trip.endDate,
+            clientFullName: exonerationMember.fullName,
+            travelerName: traveler.travelerName,
+            travelerRole: traveler.travelerRole,
+            travelerIdType: traveler.travelerIdType,
+            travelerIdNumber: traveler.travelerIdNumber,
+            emergencyContactName: traveler.emergencyContactName,
+            emergencyContactPhone: traveler.emergencyContactPhone,
+            hasOwnInsurance: traveler.hasOwnInsurance,
+            includeEdwin: exonerationDraft.payload.lucitours.signatories.includeEdwin,
+            includeErick: exonerationDraft.payload.lucitours.signatories.includeErick,
+            lucitoursEdwinDate: exonerationDraft.payload.signatures.lucitoursEdwinDate,
+            lucitoursErickDate: exonerationDraft.payload.signatures.lucitoursErickDate,
+            issuedAt: formatIsoDate(new Date().toISOString()),
+          }),
           previewText: renderInsuranceExonerationPreview({
             contractNumber: exonerationDraft.payload.contract.number,
             annexNumber: buildExonerationAnnexNumber(
@@ -1057,6 +1292,25 @@ export default function ContractsPage() {
             guardianIdNumber: minorPermitMember.identification,
             guardianPhone: companion.emergencyContactPhone || minorPermitMember.phone,
             hasSupportingPermit,
+            previewHtml: renderMinorPermitAnnexPreviewHtml({
+              contractNumber: minorPermitDraft.payload.contract.number,
+              annexNumber,
+              tripDestination: minorPermitDraft.payload.trip.destinationCountry,
+              tripStartDate: minorPermitDraft.payload.trip.startDate,
+              tripEndDate: minorPermitDraft.payload.trip.endDate,
+              clientFullName: minorPermitMember.fullName,
+              minorFullName: companion.fullName || "Acompanante menor",
+              minorIdType: toContractIdTypeLabel(
+                (companion as { identificationTypeId?: string }).identificationTypeId ??
+                  minorPermitMember.identificationTypeId,
+              ),
+              minorIdNumber: companion.identification,
+              guardianName: companion.emergencyContactName || minorPermitMember.fullName,
+              guardianIdType: toContractIdTypeLabel(minorPermitMember.identificationTypeId),
+              guardianIdNumber: minorPermitMember.identification,
+              guardianPhone: companion.emergencyContactPhone || minorPermitMember.phone,
+              issuedAt: formatIsoDate(new Date().toISOString()),
+            }),
             previewText: renderMinorPermitAnnexPreview({
               contractNumber: minorPermitDraft.payload.contract.number,
               annexNumber,
@@ -1714,17 +1968,12 @@ export default function ContractsPage() {
                   alt="Logo Lucitours"
                   className="absolute right-3 top-3 h-10 w-auto object-contain"
                 />
-                <div className="pt-12 font-mono text-xs leading-5 text-slate-800">
-                  {previewContractText
-                    .split("\n")
-                    .map((line, idx) => (
-                      <div
-                        key={`${idx}-${line.slice(0, 12)}`}
-                        className={`whitespace-pre-wrap ${isClauseHeading(line) ? "font-bold" : ""}`}
-                      >
-                        {line.length > 0 ? line : "\u00A0"}
-                      </div>
-                    ))}
+                <div className="pt-12">
+                  <iframe
+                    title="Vista previa contrato"
+                    srcDoc={previewContractHtml}
+                    className="h-[65vh] w-full rounded-md border border-slate-200 bg-white"
+                  />
                 </div>
               </div>
             </div>
@@ -1750,7 +1999,33 @@ export default function ContractsPage() {
                       : "Debes enviar el contrato a firma antes de descargar"
                   }
                 >
-                  Descargar contrato
+                  Descargar contrato (PDF)
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void emailContractPreview(previewMember, previewContractText)}
+                  disabled={
+                    previewMember.contractsWorkflowStatus !== ContractsWorkflowStatus.SENT_TO_SIGN &&
+                    previewMember.contractsWorkflowStatus !== ContractsWorkflowStatus.APPROVED ||
+                    !previewMember.email ||
+                    emailBusyKey === `contract:${previewMember.id}`
+                  }
+                >
+                  {emailBusyKey === `contract:${previewMember.id}`
+                    ? "Enviando correo..."
+                    : "Enviar PDF por correo"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => openPrintableDocument(previewContractHtml)}
+                  disabled={
+                    previewMember.contractsWorkflowStatus !== ContractsWorkflowStatus.SENT_TO_SIGN &&
+                    previewMember.contractsWorkflowStatus !== ContractsWorkflowStatus.APPROVED
+                  }
+                >
+                  Abrir para imprimir
                 </Button>
                 <Button
                   type="button"
@@ -1842,15 +2117,11 @@ export default function ContractsPage() {
 
               {insuranceAnnexTravelers.length > 0 ? (
                 <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <div className="font-mono text-xs leading-5 text-slate-800">
-                    {annexPreviewText
-                      .split("\n")
-                      .map((line, idx) => (
-                        <div key={`${idx}-${line.slice(0, 12)}`} className="whitespace-pre-wrap">
-                          {line.length > 0 ? line : "\u00A0"}
-                        </div>
-                      ))}
-                  </div>
+                  <iframe
+                    title="Vista previa anexo de seguro"
+                    srcDoc={annexPreviewHtml}
+                    className="h-[52vh] w-full rounded-md border border-slate-200 bg-white"
+                  />
                 </div>
               ) : (
                 <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
@@ -1879,7 +2150,33 @@ export default function ContractsPage() {
                       : "Debes enviar el anexo a firma antes de descargar"
                   }
                 >
-                  Descargar PDF
+                  Descargar anexo (PDF)
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void emailAnnexPreview(annexMember, annexPreviewText)}
+                  disabled={
+                    insuranceAnnexTravelers.length === 0 ||
+                    !annexStatusByMember[annexMember.id]?.sentAt ||
+                    !annexMember.email ||
+                    emailBusyKey === `annex:${annexMember.id}`
+                  }
+                >
+                  {emailBusyKey === `annex:${annexMember.id}`
+                    ? "Enviando correo..."
+                    : "Enviar PDF por correo"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => openPrintableDocument(annexPreviewHtml)}
+                  disabled={
+                    insuranceAnnexTravelers.length === 0 ||
+                    !annexStatusByMember[annexMember.id]?.sentAt
+                  }
+                >
+                  Abrir para imprimir
                 </Button>
                 <Button
                   type="button"
@@ -1989,15 +2286,11 @@ export default function ContractsPage() {
                       </div>
 
                       <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
-                        <div className="font-mono text-[11px] leading-5 text-slate-800">
-                          {annex.previewText
-                            .split("\n")
-                            .map((line, idx) => (
-                              <div key={`${annex.annexNumber}-${idx}`} className="whitespace-pre-wrap">
-                                {line.length > 0 ? line : "\u00A0"}
-                              </div>
-                            ))}
-                        </div>
+                        <iframe
+                          title={`Vista previa exoneracion ${annex.annexNumber}`}
+                          srcDoc={annex.previewHtml}
+                          className="h-[44vh] w-full rounded-md border border-slate-200 bg-white"
+                        />
                       </div>
 
                       <div className="mt-3 flex flex-wrap gap-2">
@@ -2043,7 +2336,38 @@ export default function ContractsPage() {
                               : "Debes enviar la exoneracion a firma antes de descargar"
                           }
                         >
-                          Descargar exoneracion
+                          Descargar exoneracion (PDF)
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            void emailExonerationPreview(
+                              exonerationMember,
+                              annex.annexNumber,
+                              annex.travelerName,
+                              annex.previewText,
+                            )
+                          }
+                          disabled={
+                            !exonerationStatusByAnnex[annex.annexNumber]?.sentAt ||
+                            !exonerationMember.email ||
+                            emailBusyKey === `exoneration:${annex.annexNumber}`
+                          }
+                        >
+                          {emailBusyKey === `exoneration:${annex.annexNumber}`
+                            ? "Enviando..."
+                            : "Enviar PDF por correo"}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openPrintableDocument(annex.previewHtml)}
+                          disabled={!exonerationStatusByAnnex[annex.annexNumber]?.sentAt}
+                        >
+                          Abrir para imprimir
                         </Button>
                       </div>
                     </div>
@@ -2188,20 +2512,47 @@ export default function ContractsPage() {
                               : "Debes enviar el anexo de menor a firma antes de descargar"
                           }
                         >
-                          Descargar anexo menor
+                          Descargar anexo menor (PDF)
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            void emailMinorPermitPreview(
+                              minorPermitMember,
+                              annex.annexNumber,
+                              annex.minorName,
+                              annex.previewText,
+                            )
+                          }
+                          disabled={
+                            !minorPermitStatusByAnnex[annex.annexNumber]?.sentAt ||
+                            !minorPermitMember.email ||
+                            emailBusyKey === `minor:${annex.annexNumber}`
+                          }
+                        >
+                          {emailBusyKey === `minor:${annex.annexNumber}`
+                            ? "Enviando..."
+                            : "Enviar PDF por correo"}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openPrintableDocument(annex.previewHtml)}
+                          disabled={!minorPermitStatusByAnnex[annex.annexNumber]?.sentAt}
+                        >
+                          Abrir para imprimir
                         </Button>
                       </div>
 
-                      <div className="max-h-40 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-2">
-                        <div className="font-mono text-[11px] leading-5 text-slate-800">
-                          {annex.previewText
-                            .split("\n")
-                            .map((line, idx) => (
-                              <div key={`${annex.annexNumber}-${idx}`} className="whitespace-pre-wrap">
-                                {line.length > 0 ? line : "\u00A0"}
-                              </div>
-                            ))}
-                        </div>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                        <iframe
+                          title={`Vista previa anexo menor ${annex.annexNumber}`}
+                          srcDoc={annex.previewHtml}
+                          className="h-[44vh] w-full rounded-md border border-slate-200 bg-white"
+                        />
                       </div>
                     </div>
                   ))}

@@ -1,3 +1,5 @@
+import { renderBrandedDocumentHtml } from "@/lib/contracts/renderDocumentHtml";
+
 export interface InsuranceExonerationPayload {
   contractNumber: string;
   annexNumber: string;
@@ -96,3 +98,10 @@ export const renderInsuranceExonerationPreview = (
 
   return lines.join("\n").trim();
 };
+
+export const renderInsuranceExonerationPreviewHtml = (
+  payload: InsuranceExonerationPayload,
+): string =>
+  renderBrandedDocumentHtml({
+    bodyText: renderInsuranceExonerationPreview(payload),
+  });

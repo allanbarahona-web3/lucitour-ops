@@ -1,5 +1,6 @@
 import type { ContractPayload } from "@/lib/contracts/contractMapper";
 import { CONTRACT_GENERAL_TEMPLATE } from "@/lib/contracts/contractGeneralTemplate";
+import { renderBrandedDocumentHtml } from "@/lib/contracts/renderDocumentHtml";
 
 type Dict = Record<string, unknown>;
 
@@ -94,3 +95,8 @@ export const renderContractGeneralPreview = (payload: ContractPayload): string =
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 };
+
+export const renderContractGeneralPreviewHtml = (payload: ContractPayload): string =>
+  renderBrandedDocumentHtml({
+    bodyText: renderContractGeneralPreview(payload),
+  });

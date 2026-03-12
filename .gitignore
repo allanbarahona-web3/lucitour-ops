@@ -4,3 +4,10 @@ node_modules
 .env.local
 .env.*.local
 dist
+
+# Sensitive contract artifacts and drafts
+/private/contracts/
+/generated/contracts/
+**/*.contract.html
+**/*.contract.pdf
+src/components/admin/*.md

@@ -1,3 +1,5 @@
+import { renderBrandedDocumentHtml } from "@/lib/contracts/renderDocumentHtml";
+
 export interface InsuranceAnnexTraveler {
   travelerName: string;
   travelerRole: string;
@@ -119,3 +121,8 @@ export const renderInsuranceAnnexPreview = (payload: InsuranceAnnexPayload): str
 
   return lines.join("\n").trim();
 };
+
+export const renderInsuranceAnnexPreviewHtml = (payload: InsuranceAnnexPayload): string =>
+  renderBrandedDocumentHtml({
+    bodyText: renderInsuranceAnnexPreview(payload),
+  });
