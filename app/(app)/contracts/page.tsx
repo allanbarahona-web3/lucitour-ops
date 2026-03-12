@@ -26,7 +26,6 @@ import {
 import { mapTripMemberToContractDraft } from "@/lib/contracts/contractMapper";
 import {
   renderContractGeneralPreview,
-  renderContractGeneralPreviewHtml,
 } from "@/lib/contracts/renderContractTemplate";
 import {
   renderInsuranceAnnexPreview,
@@ -747,16 +746,87 @@ export default function ContractsPage() {
     }
 
     const { jsPDF } = await import("jspdf");
+
+    const toDataUrl = async (path: string): Promise<string | null> => {
+      try {
+        const response = await fetch(path);
+        if (!response.ok) {
+          return null;
+        }
+        const blob = await response.blob();
+        return await new Promise<string | null>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(blob);
+        });
+      } catch {
+        return null;
+      }
+    };
+
     const pdf = new jsPDF({ unit: "pt", format: "a4" });
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
     const marginX = 42;
-    const marginTop = 48;
-    const lineHeight = 14;
+    const headerHeight = 64;
+    const footerHeight = 42;
+    const contentTop = headerHeight + 26;
+    const contentBottom = pageHeight - footerHeight - 18;
+    const lineHeight = 14.5;
+    const logoDataUrl = await toDataUrl("/logo/logo-lucitour.png");
+
+    const drawPageChrome = (pageNumber: number) => {
+      if (logoDataUrl) {
+        pdf.addImage(logoDataUrl, "PNG", marginX, 14, 110, 40);
+      }
+
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(9);
+      pdf.setTextColor(71, 85, 105);
+      pdf.text("VIAJES LUCITOURS TURISMO INTERNACIONAL", pageWidth - marginX, 24, {
+        align: "right",
+      });
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8.5);
+      pdf.text("3-101-874546", pageWidth - marginX, 36, { align: "right" });
+      pdf.text("+506 6015-9906", pageWidth - marginX, 47, { align: "right" });
+      pdf.text("lucitours1211@gmail.com", pageWidth - marginX, 58, { align: "right" });
+
+      pdf.setDrawColor(226, 232, 240);
+      pdf.line(marginX, headerHeight, pageWidth - marginX, headerHeight);
+
+      const footerY = pageHeight - footerHeight;
+      pdf.line(marginX, footerY, pageWidth - marginX, footerY);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8);
+      pdf.setTextColor(100, 116, 139);
+      pdf.text("Documento contractual generado por Lucitours.", marginX, footerY + 16);
+
+      pdf.setDrawColor(167, 243, 208);
+      pdf.setFillColor(236, 253, 245);
+      const badgeWidth = 98;
+      const badgeX = pageWidth - marginX - badgeWidth;
+      pdf.roundedRect(badgeX, footerY + 7, badgeWidth, 17, 8, 8, "FD");
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(8);
+      pdf.setTextColor(6, 95, 70);
+      pdf.text("AFILIADO A CANATUR", badgeX + badgeWidth / 2, footerY + 18, {
+        align: "center",
+      });
+
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8);
+      pdf.setTextColor(100, 116, 139);
+      pdf.text(`Pag. ${pageNumber}`, pageWidth / 2, pageHeight - 10, { align: "center" });
+    };
+
+    drawPageChrome(1);
 
     pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(12);
-    pdf.text(title, marginX, marginTop);
+    pdf.setFontSize(11);
+    pdf.setTextColor(15, 23, 42);
+    const titleLines = pdf.splitTextToSize(title, pageWidth - marginX * 2) as string[];
 
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(10);
@@ -764,59 +834,32 @@ export default function ContractsPage() {
     const maxTextWidth = pageWidth - marginX * 2;
     const split = pdf.splitTextToSize(normalizedContent, maxTextWidth) as string[];
 
-    let y = marginTop + 24;
+    let y = contentTop;
+
+    titleLines.forEach((line) => {
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(11);
+      pdf.text(line, marginX, y);
+      y += lineHeight;
+    });
+
+    y += 6;
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+
+    let pageNumber = 1;
     split.forEach((line) => {
-      if (y > pageHeight - 36) {
+      if (y > contentBottom) {
         pdf.addPage();
-        y = marginTop;
+        pageNumber += 1;
+        drawPageChrome(pageNumber);
+        y = contentTop;
       }
       pdf.text(line, marginX, y);
       y += lineHeight;
     });
 
     return new Uint8Array(pdf.output("arraybuffer"));
-  };
-
-  const buildPdfFromHtml = async (html: string): Promise<Uint8Array | null> => {
-    if (!html.trim()) {
-      return null;
-    }
-
-    const { jsPDF } = await import("jspdf");
-    const pdf = new jsPDF({ unit: "pt", format: "a4" });
-    const parser = new DOMParser();
-    const parsed = parser.parseFromString(html, "text/html");
-    const styles = Array.from(parsed.querySelectorAll("style"))
-      .map((node) => node.textContent || "")
-      .join("\n");
-    const bodyHtml = parsed.body?.innerHTML || "";
-
-    const container = document.createElement("div");
-    container.style.position = "fixed";
-    container.style.left = "-100000px";
-    container.style.top = "0";
-    container.style.width = "794px";
-    container.style.background = "#ffffff";
-    container.innerHTML = `<style>${styles}</style>${bodyHtml}`;
-    document.body.append(container);
-
-    try {
-      await pdf.html(container, {
-        margin: [0, 0, 0, 0],
-        autoPaging: "text",
-        html2canvas: {
-          scale: 0.8,
-          useCORS: true,
-          backgroundColor: "#ffffff",
-        },
-      });
-
-      return new Uint8Array(pdf.output("arraybuffer"));
-    } catch {
-      return null;
-    } finally {
-      container.remove();
-    }
   };
 
   const bytesToBase64 = (bytes: Uint8Array): string => {
@@ -836,22 +879,6 @@ export default function ContractsPage() {
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
     anchor.download = `${fileBaseName}.pdf`;
-    document.body.append(anchor);
-    anchor.click();
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
-  };
-
-  const downloadHtmlDocument = (fileBaseName: string, html: string) => {
-    if (!html.trim()) {
-      return;
-    }
-
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const objectUrl = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = `${fileBaseName}.html`;
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
@@ -883,10 +910,10 @@ export default function ContractsPage() {
       fileName: string;
       pdfBytes: Uint8Array;
     },
-  ) => {
+  ): Promise<boolean> => {
     if (!member.email?.trim()) {
       window.alert("Este cliente no tiene correo registrado.");
-      return;
+      return false;
     }
 
     setEmailBusyKey(params.busyKey);
@@ -908,37 +935,35 @@ export default function ContractsPage() {
       const data = (await response.json().catch(() => null)) as { error?: string } | null;
       if (!response.ok) {
         window.alert(data?.error || "No se pudo enviar el correo.");
-        return;
+        return false;
       }
 
       window.alert(`PDF enviado por correo a ${member.email}.`);
+      return true;
     } catch {
       window.alert("Error inesperado enviando el correo.");
+      return false;
     } finally {
       setEmailBusyKey(null);
     }
   };
 
-  const downloadContractPreview = async (member: TripMember, content: string, html: string) => {
+  const downloadContractPreview = async (member: TripMember, content: string) => {
     const safeName = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
-    const pdfBytes =
-      (await buildPdfFromHtml(html)) ??
-      (await buildPdfFromText(`Contrato · ${member.fullName}`, content));
+    const pdfBytes = await buildPdfFromText(`Contrato · ${member.fullName}`, content);
     if (!pdfBytes) {
       return;
     }
     downloadPdfDocument(`contrato-${safeName}`, pdfBytes);
   };
 
-  const emailContractPreview = async (member: TripMember, content: string, html: string) => {
+  const emailContractPreview = async (member: TripMember, content: string) => {
     const safeName = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
-    const pdfBytes =
-      (await buildPdfFromHtml(html)) ??
-      (await buildPdfFromText(`Contrato · ${member.fullName}`, content));
+    const pdfBytes = await buildPdfFromText(`Contrato · ${member.fullName}`, content);
     if (!pdfBytes) {
       return;
     }
-    await sendPdfByEmail(member, {
+    const sent = await sendPdfByEmail(member, {
       busyKey: `contract:${member.id}`,
       subject: `Contrato para firma · ${member.fullName}`,
       messageText:
@@ -946,24 +971,28 @@ export default function ContractsPage() {
       fileName: `contrato-${safeName}.pdf`,
       pdfBytes,
     });
+
+    if (
+      sent &&
+      member.contractsWorkflowStatus !== ContractsWorkflowStatus.SENT_TO_SIGN &&
+      member.contractsWorkflowStatus !== ContractsWorkflowStatus.APPROVED
+    ) {
+      await handleStatusChange(member, ContractsWorkflowStatus.SENT_TO_SIGN);
+    }
   };
 
-  const downloadAnnexPreview = async (member: TripMember, content: string, html: string) => {
+  const downloadAnnexPreview = async (member: TripMember, content: string) => {
     const safeName = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
-    const pdfBytes =
-      (await buildPdfFromHtml(html)) ??
-      (await buildPdfFromText(`Anexo de seguro · ${member.fullName}`, content));
+    const pdfBytes = await buildPdfFromText(`Anexo de seguro · ${member.fullName}`, content);
     if (!pdfBytes) {
       return;
     }
     downloadPdfDocument(`anexo-seguro-${safeName}`, pdfBytes);
   };
 
-  const emailAnnexPreview = async (member: TripMember, content: string, html: string) => {
+  const emailAnnexPreview = async (member: TripMember, content: string) => {
     const safeName = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
-    const pdfBytes =
-      (await buildPdfFromHtml(html)) ??
-      (await buildPdfFromText(`Anexo de seguro · ${member.fullName}`, content));
+    const pdfBytes = await buildPdfFromText(`Anexo de seguro · ${member.fullName}`, content);
     if (!pdfBytes) {
       return;
     }
@@ -981,13 +1010,10 @@ export default function ContractsPage() {
     member: TripMember,
     travelerName: string,
     content: string,
-    html: string,
   ) => {
     const safeMember = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
     const safeTraveler = travelerName.trim().replace(/\s+/g, "-").toLowerCase() || "viajero";
-    const pdfBytes =
-      (await buildPdfFromHtml(html)) ??
-      (await buildPdfFromText(`Anexo exoneracion · ${travelerName}`, content));
+    const pdfBytes = await buildPdfFromText(`Anexo exoneracion · ${travelerName}`, content);
     if (!pdfBytes) {
       return;
     }
@@ -999,13 +1025,10 @@ export default function ContractsPage() {
     annexNumber: string,
     travelerName: string,
     content: string,
-    html: string,
   ) => {
     const safeMember = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
     const safeTraveler = travelerName.trim().replace(/\s+/g, "-").toLowerCase() || "viajero";
-    const pdfBytes =
-      (await buildPdfFromHtml(html)) ??
-      (await buildPdfFromText(`Anexo exoneracion · ${travelerName}`, content));
+    const pdfBytes = await buildPdfFromText(`Anexo exoneracion · ${travelerName}`, content);
     if (!pdfBytes) {
       return;
     }
@@ -1023,13 +1046,10 @@ export default function ContractsPage() {
     member: TripMember,
     minorName: string,
     content: string,
-    html: string,
   ) => {
     const safeMember = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
     const safeMinor = minorName.trim().replace(/\s+/g, "-").toLowerCase() || "menor";
-    const pdfBytes =
-      (await buildPdfFromHtml(html)) ??
-      (await buildPdfFromText(`Anexo autorizacion menor · ${minorName}`, content));
+    const pdfBytes = await buildPdfFromText(`Anexo autorizacion menor · ${minorName}`, content);
     if (!pdfBytes) {
       return;
     }
@@ -1041,13 +1061,10 @@ export default function ContractsPage() {
     annexNumber: string,
     minorName: string,
     content: string,
-    html: string,
   ) => {
     const safeMember = member.fullName.trim().replace(/\s+/g, "-").toLowerCase() || member.id;
     const safeMinor = minorName.trim().replace(/\s+/g, "-").toLowerCase() || "menor";
-    const pdfBytes =
-      (await buildPdfFromHtml(html)) ??
-      (await buildPdfFromText(`Anexo autorizacion menor · ${minorName}`, content));
+    const pdfBytes = await buildPdfFromText(`Anexo autorizacion menor · ${minorName}`, content);
     if (!pdfBytes) {
       return;
     }
@@ -1197,9 +1214,6 @@ export default function ContractsPage() {
     : null;
   const previewContractText = previewDraft
     ? renderContractGeneralPreview(previewDraft.payload)
-    : "";
-  const previewContractHtml = previewDraft
-    ? renderContractGeneralPreviewHtml(previewDraft.payload)
     : "";
   const previewContractModalHtml = previewContractText
     ? renderPlainPreviewHtml(previewContractText)
@@ -2129,9 +2143,7 @@ export default function ContractsPage() {
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() =>
-                    void downloadContractPreview(previewMember, previewContractText, previewContractHtml)
-                  }
+                  onClick={() => void downloadContractPreview(previewMember, previewContractText)}
                   disabled={
                     previewMember.contractsWorkflowStatus !== ContractsWorkflowStatus.SENT_TO_SIGN &&
                     previewMember.contractsWorkflowStatus !== ContractsWorkflowStatus.APPROVED
@@ -2149,48 +2161,19 @@ export default function ContractsPage() {
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() =>
-                    void emailContractPreview(previewMember, previewContractText, previewContractHtml)
-                  }
+                  onClick={() => void emailContractPreview(previewMember, previewContractText)}
                   disabled={
-                    previewMember.contractsWorkflowStatus !== ContractsWorkflowStatus.SENT_TO_SIGN &&
-                    previewMember.contractsWorkflowStatus !== ContractsWorkflowStatus.APPROVED ||
+                    previewDraft.missingFields.length > 0 ||
+                    previewCedulaIssues.length > 0 ||
+                    previewMember.contractsWorkflowStatus === ContractsWorkflowStatus.APPROVED ||
+                    busyId === previewMember.id ||
                     !previewMember.email ||
                     emailBusyKey === `contract:${previewMember.id}`
                   }
                 >
                   {emailBusyKey === `contract:${previewMember.id}`
                     ? "Enviando correo..."
-                    : "Enviar PDF por correo"}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => openPrintableDocument(previewContractHtml)}
-                  disabled={
-                    previewMember.contractsWorkflowStatus !== ContractsWorkflowStatus.SENT_TO_SIGN &&
-                    previewMember.contractsWorkflowStatus !== ContractsWorkflowStatus.APPROVED
-                  }
-                >
-                  Abrir para imprimir
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    void handleStatusChange(previewMember, ContractsWorkflowStatus.SENT_TO_SIGN)
-                  }
-                  disabled={
-                    previewDraft.missingFields.length > 0 ||
-                    previewCedulaIssues.length > 0 ||
-                    previewMember.contractsWorkflowStatus === ContractsWorkflowStatus.SENT_TO_SIGN ||
-                    previewMember.contractsWorkflowStatus === ContractsWorkflowStatus.APPROVED ||
-                    busyId === previewMember.id
-                  }
-                >
-                  Enviar contrato a firma
+                    : "Enviar PDF a firmar"}
                 </Button>
                 <Button
                   type="button"
@@ -2292,7 +2275,7 @@ export default function ContractsPage() {
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => void downloadAnnexPreview(annexMember, annexPreviewText, annexPreviewHtml)}
+                  onClick={() => void downloadAnnexPreview(annexMember, annexPreviewText)}
                   disabled={
                     insuranceAnnexTravelers.length === 0 ||
                     !annexStatusByMember[annexMember.id]?.sentAt
@@ -2309,7 +2292,7 @@ export default function ContractsPage() {
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => void emailAnnexPreview(annexMember, annexPreviewText, annexPreviewHtml)}
+                  onClick={() => void emailAnnexPreview(annexMember, annexPreviewText)}
                   disabled={
                     insuranceAnnexTravelers.length === 0 ||
                     !annexStatusByMember[annexMember.id]?.sentAt ||
@@ -2485,7 +2468,6 @@ export default function ContractsPage() {
                               exonerationMember,
                               annex.travelerName,
                               annex.previewText,
-                              annex.previewHtml,
                             )
                           }
                           disabled={!exonerationStatusByAnnex[annex.annexNumber]?.sentAt}
@@ -2507,7 +2489,6 @@ export default function ContractsPage() {
                               annex.annexNumber,
                               annex.travelerName,
                               annex.previewText,
-                              annex.previewHtml,
                             )
                           }
                           disabled={
@@ -2665,7 +2646,6 @@ export default function ContractsPage() {
                               minorPermitMember,
                               annex.minorName,
                               annex.previewText,
-                              annex.previewHtml,
                             )
                           }
                           disabled={!minorPermitStatusByAnnex[annex.annexNumber]?.sentAt}
@@ -2687,7 +2667,6 @@ export default function ContractsPage() {
                               annex.annexNumber,
                               annex.minorName,
                               annex.previewText,
-                              annex.previewHtml,
                             )
                           }
                           disabled={
