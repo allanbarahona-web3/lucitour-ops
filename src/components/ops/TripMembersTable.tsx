@@ -71,6 +71,8 @@ const isPending = (member: TripMember) =>
   member.passportStatus === PassportStatus.NOT_ENTERED ||
   member.itineraryStatus === ItineraryStatus.MISSING;
 
+const normalizeName = (value: string) => value.trim().toLowerCase();
+
 interface TripMembersTableProps {
   tripId: string;
   tripName: string;
@@ -437,15 +439,52 @@ export const TripMembersTable = ({
   };
 
   const updateCompanions = (member: TripMember, nextCompanions: TripMember["companions"]) => {
-    const hasMinorCompanions = nextCompanions.some((companion) => companion.isMinor);
-    const nextHasCompanions = nextCompanions.length > 0;
+    const syncedCompanions = nextCompanions.map((companion) => {
+      if (!companion.isMinor) {
+        return companion;
+      }
+
+      const guardianName = companion.emergencyContactName?.trim() || "";
+      if (!guardianName) {
+        return companion;
+      }
+
+      if (normalizeName(guardianName) === normalizeName(member.fullName)) {
+        return {
+          ...companion,
+          phone: member.phone,
+          email: member.email,
+          emergencyContactPhone: member.phone,
+        };
+      }
+
+      const adultCompanion = nextCompanions.find(
+        (candidate) =>
+          !candidate.isMinor &&
+          normalizeName(candidate.fullName || "") === normalizeName(guardianName),
+      );
+
+      if (!adultCompanion) {
+        return companion;
+      }
+
+      return {
+        ...companion,
+        phone: adultCompanion.phone,
+        email: adultCompanion.email,
+        emergencyContactPhone: adultCompanion.phone,
+      };
+    });
+
+    const hasMinorCompanions = syncedCompanions.some((companion) => companion.isMinor);
+    const nextHasCompanions = syncedCompanions.length > 0;
     const nextDocuments = hasMinorCompanions
       ? member.documents
       : member.documents.filter((doc) => doc.type !== "MINOR_PERMIT");
     schedulePricingUpdate(
       member,
       {
-        companions: nextCompanions,
+        companions: syncedCompanions,
         hasCompanions: nextHasCompanions,
         hasMinorCompanions,
         hasParentalAuthority: hasMinorCompanions ? member.hasParentalAuthority : null,
@@ -1670,7 +1709,7 @@ const requiresMinorPermit = (member: TripMember) =>
                                             <input
                                               className={inputClassName}
                                               value={companion.email}
-                                              disabled={step2Locked}
+                                              disabled={step2Locked || companion.isMinor}
                                               onChange={(event) => {
                                                 const next = [...member.companions];
                                                 next[index] = { ...companion, email: event.target.value };
@@ -1683,7 +1722,7 @@ const requiresMinorPermit = (member: TripMember) =>
                                             <input
                                               className={inputClassName}
                                               value={companion.phone}
-                                              disabled={step2Locked}
+                                              disabled={step2Locked || companion.isMinor}
                                               onChange={(event) => {
                                                 const next = [...member.companions];
                                                 next[index] = { ...companion, phone: event.target.value };
@@ -1865,6 +1904,89 @@ const requiresMinorPermit = (member: TripMember) =>
                                         {companion.fullName || `Acompanante ${idx + 1}`}
                                       </label>
                                     ))}
+                                  </div>
+                                ) : null}
+
+                                {member.companions.some((companion) => companion.isMinor) ? (
+                                  <div className="space-y-2 rounded-md border border-slate-200 bg-white p-2">
+                                    <p className="text-xs font-semibold text-slate-700">
+                                      Tutor legal por menor
+                                    </p>
+                                    {member.companions
+                                      .map((companion, idx) => ({ companion, idx }))
+                                      .filter(({ companion }) => companion.isMinor)
+                                      .map(({ companion, idx }) => {
+                                        const guardianOptions = [
+                                          {
+                                            value: member.fullName,
+                                            label: `Titular: ${member.fullName}`,
+                                            phone: member.phone,
+                                            email: member.email,
+                                          },
+                                          ...member.companions
+                                            .filter((candidate) => !candidate.isMinor)
+                                            .map((candidate, candidateIdx) => ({
+                                              value: candidate.fullName || `Acompanante ${candidateIdx + 1}`,
+                                              label: `Acompanante adulto: ${candidate.fullName || `Acompanante ${candidateIdx + 1}`}`,
+                                              phone: candidate.phone,
+                                              email: candidate.email,
+                                            })),
+                                        ];
+
+                                        return (
+                                          <div
+                                            key={`${companion.id}:guardian`}
+                                            className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 md:grid-cols-2"
+                                          >
+                                            <div className="space-y-1">
+                                              <div className="text-xs font-semibold text-slate-600">
+                                                Menor
+                                              </div>
+                                              <div className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700">
+                                                {companion.fullName || `Acompanante ${idx + 1}`}
+                                              </div>
+                                            </div>
+                                            <div className="space-y-1">
+                                              <div className="text-xs font-semibold text-slate-600">
+                                                Tutor legal (titular o adulto)
+                                              </div>
+                                              <select
+                                                className={selectClassName}
+                                                value={companion.emergencyContactName || ""}
+                                                disabled={step2Locked}
+                                                onChange={(event) => {
+                                                  const selectedName = event.target.value;
+                                                  const selectedGuardian = guardianOptions.find(
+                                                    (option) => option.value === selectedName,
+                                                  );
+                                                  const next = [...member.companions];
+                                                  next[idx] = {
+                                                    ...companion,
+                                                    emergencyContactName: selectedName,
+                                                    emergencyContactPhone: selectedName
+                                                      ? (selectedGuardian?.phone || "")
+                                                      : "",
+                                                    phone: selectedName
+                                                      ? (selectedGuardian?.phone || "")
+                                                      : companion.phone,
+                                                    email: selectedName
+                                                      ? (selectedGuardian?.email || "")
+                                                      : companion.email,
+                                                  };
+                                                  updateCompanions(member, next);
+                                                }}
+                                              >
+                                                <option value="">Selecciona tutor</option>
+                                                {guardianOptions.map((option) => (
+                                                  <option key={option.value} value={option.value}>
+                                                    {option.label}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
                                   </div>
                                 ) : null}
                               </div>

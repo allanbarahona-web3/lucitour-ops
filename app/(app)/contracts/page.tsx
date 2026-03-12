@@ -79,6 +79,45 @@ const belongsToOwner = (docOwnerName: string, ownerName: string, titularFullName
   return normalizeOwnerName(docOwnerName) === normalizeOwnerName(ownerName);
 };
 
+const resolveGuardianFromMember = (
+  member: TripMember,
+  minorCompanion: TripMember["companions"][number],
+) => {
+  const requestedGuardianName = minorCompanion.emergencyContactName?.trim() || "";
+  const requestedGuardianPhone = minorCompanion.emergencyContactPhone?.trim() || "";
+
+  if (!requestedGuardianName || isTitularOwnerName(requestedGuardianName, member.fullName)) {
+    return {
+      guardianName: member.fullName,
+      guardianIdType: member.identificationTypeId,
+      guardianIdNumber: member.identification,
+      guardianPhone: requestedGuardianPhone || member.phone,
+    };
+  }
+
+  const adultCompanion = member.companions.find(
+    (candidate) =>
+      !candidate.isMinor &&
+      normalizeOwnerName(candidate.fullName || "") === normalizeOwnerName(requestedGuardianName),
+  );
+
+  if (adultCompanion) {
+    return {
+      guardianName: adultCompanion.fullName || requestedGuardianName,
+      guardianIdType: adultCompanion.identificationTypeId || member.identificationTypeId,
+      guardianIdNumber: adultCompanion.identification || member.identification,
+      guardianPhone: adultCompanion.phone || requestedGuardianPhone || member.phone,
+    };
+  }
+
+  return {
+    guardianName: requestedGuardianName,
+    guardianIdType: member.identificationTypeId,
+    guardianIdNumber: member.identification,
+    guardianPhone: requestedGuardianPhone || member.phone,
+  };
+};
+
 const ANNEX_CUTOFF_HOURS = 48;
 
 const OUTBOUND_ACTIVITY = "Vuelo de ida al destino.";
@@ -1360,6 +1399,7 @@ export default function ContractsPage() {
             minorPermitDraft.payload.contract.number,
             companion.fullName || "Acompanante menor",
           );
+          const guardian = resolveGuardianFromMember(minorPermitMember, companion);
           const hasSupportingPermit = minorPermitMember.documents.some(
             (doc) =>
               doc.type === "MINOR_PERMIT" &&
@@ -1373,10 +1413,10 @@ export default function ContractsPage() {
                 minorPermitMember.identificationTypeId,
             ),
             minorIdNumber: companion.identification,
-            guardianName: companion.emergencyContactName || minorPermitMember.fullName,
-            guardianIdType: toContractIdTypeLabel(minorPermitMember.identificationTypeId),
-            guardianIdNumber: minorPermitMember.identification,
-            guardianPhone: companion.emergencyContactPhone || minorPermitMember.phone,
+            guardianName: guardian.guardianName,
+            guardianIdType: toContractIdTypeLabel(guardian.guardianIdType),
+            guardianIdNumber: guardian.guardianIdNumber,
+            guardianPhone: guardian.guardianPhone,
             hasSupportingPermit,
             previewText: renderMinorPermitAnnexPreview({
               contractNumber: minorPermitDraft.payload.contract.number,
@@ -1391,10 +1431,10 @@ export default function ContractsPage() {
                   minorPermitMember.identificationTypeId,
               ),
               minorIdNumber: companion.identification,
-              guardianName: companion.emergencyContactName || minorPermitMember.fullName,
-              guardianIdType: toContractIdTypeLabel(minorPermitMember.identificationTypeId),
-              guardianIdNumber: minorPermitMember.identification,
-              guardianPhone: companion.emergencyContactPhone || minorPermitMember.phone,
+              guardianName: guardian.guardianName,
+              guardianIdType: toContractIdTypeLabel(guardian.guardianIdType),
+              guardianIdNumber: guardian.guardianIdNumber,
+              guardianPhone: guardian.guardianPhone,
               issuedAt: formatIsoDate(new Date().toISOString()),
             }),
           };
@@ -2475,7 +2515,15 @@ export default function ContractsPage() {
                         Respaldo de permiso cargado: {annex.hasSupportingPermit ? "SI" : "NO"}
                       </div>
 
-                      <div className="mb-2 flex flex-wrap gap-2">
+                      <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                        <iframe
+                          title={`Vista previa anexo menor ${annex.annexNumber}`}
+                          srcDoc={renderPlainPreviewHtml(annex.previewText)}
+                          className="h-[40vh] w-full rounded-md border border-slate-200 bg-white"
+                        />
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
                         <Button
                           type="button"
                           size="sm"
@@ -2531,14 +2579,6 @@ export default function ContractsPage() {
                             ? "Enviando..."
                             : "Enviar PDF a firmar"}
                         </Button>
-                      </div>
-
-                      <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
-                        <iframe
-                          title={`Vista previa anexo menor ${annex.annexNumber}`}
-                          srcDoc={renderPlainPreviewHtml(annex.previewText)}
-                          className="h-[40vh] w-full rounded-md border border-slate-200 bg-white"
-                        />
                       </div>
                     </div>
                   ))}
