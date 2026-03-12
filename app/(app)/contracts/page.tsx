@@ -48,6 +48,7 @@ type ExonerationStatusByAnnex = Record<string, { sentAt: string | null; signedAt
 type MinorPermitStatusByAnnex = Record<string, { sentAt: string | null; signedAt: string | null }>;
 type DocumentsOwnerFilter = "ALL" | string;
 type WorkQueueFilter = "ALL" | "PENDING_SIGNATURE" | "ORANGE" | "RED";
+type DocumentSaveState = "idle" | "saving" | "saved" | "error";
 
 const normalizeOwnerName = (value: string) => value.trim().toLowerCase();
 
@@ -93,6 +94,43 @@ const DOC_TYPE_LABEL: Record<DocumentType, string> = {
   INSURANCE: "Respaldo de seguro",
   PAYMENT_PROOF: "Comprobante de pago",
 };
+
+const escapePreviewHtml = (value: string): string =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
+const renderPlainPreviewHtml = (text: string): string => `<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vista previa contrato</title>
+    <style>
+      body {
+        margin: 0;
+        background: #f8fafc;
+        color: #0f172a;
+        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      }
+
+      .content {
+        margin: 0 auto;
+        max-width: 980px;
+        padding: 24px;
+        font-size: 13px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <pre class="content">${escapePreviewHtml(text)}</pre>
+  </body>
+</html>`;
 
 const buildFixedItinerary = (trip?: Trip, middleItems: ItineraryItem[] = []): ItineraryItem[] => {
   const safeMiddle = middleItems.filter(
@@ -204,6 +242,9 @@ export default function ContractsPage() {
     open: false,
     memberId: null,
   });
+  const [documentSaveStateById, setDocumentSaveStateById] = useState<
+    Record<string, { state: DocumentSaveState; message?: string }>
+  >({});
   const [documentsOwnerFilter, setDocumentsOwnerFilter] = useState<DocumentsOwnerFilter>("ALL");
   const [annexDialog, setAnnexDialog] = useState<{ open: boolean; memberId: string | null }>({
     open: false,
@@ -492,6 +533,11 @@ export default function ContractsPage() {
     documentId: string,
     patch: Partial<DocumentUpload>,
   ) => {
+    setDocumentSaveStateById((prev) => ({
+      ...prev,
+      [documentId]: { state: "saving", message: "Guardando cambios..." },
+    }));
+
     const now = new Date().toISOString();
     const nextDocuments = member.documents.map((doc) =>
       doc.id === documentId
@@ -528,17 +574,43 @@ export default function ContractsPage() {
 
     setItems((prev) => prev.map((item) => (item.id === member.id ? optimistic : item)));
 
-    const updated = await repo.updateTripMember(member.tripId, member.id, {
-      documents: nextDocuments,
-      passportStatus: nextPassportStatus,
-      docsStatus: nextDocsStatus,
-      contractsWorkflowStatus: optimistic.contractsWorkflowStatus,
-      contractsStatusUpdatedAt: now,
-      updatedAt: now,
-    });
+    try {
+      const updated = await repo.updateTripMember(member.tripId, member.id, {
+        documents: nextDocuments,
+        passportStatus: nextPassportStatus,
+        docsStatus: nextDocsStatus,
+        contractsWorkflowStatus: optimistic.contractsWorkflowStatus,
+        contractsStatusUpdatedAt: now,
+        updatedAt: now,
+      });
 
-    if (updated) {
-      setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      if (updated) {
+        setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      }
+
+      setDocumentSaveStateById((prev) => ({
+        ...prev,
+        [documentId]: { state: "saved", message: "Guardado" },
+      }));
+
+      window.setTimeout(() => {
+        setDocumentSaveStateById((prev) => {
+          const current = prev[documentId];
+          if (!current || current.state !== "saved") {
+            return prev;
+          }
+          return {
+            ...prev,
+            [documentId]: { state: "idle" },
+          };
+        });
+      }, 1800);
+    } catch {
+      setItems((prev) => prev.map((item) => (item.id === member.id ? member : item)));
+      setDocumentSaveStateById((prev) => ({
+        ...prev,
+        [documentId]: { state: "error", message: "No se pudo guardar. Intenta de nuevo." },
+      }));
     }
   };
 
@@ -929,6 +1001,7 @@ export default function ContractsPage() {
 
   const closeDocumentsDialog = () => {
     setDocumentsOwnerFilter("ALL");
+    setDocumentSaveStateById({});
     setDocumentsDialog({ open: false, memberId: null });
   };
 
@@ -1060,6 +1133,9 @@ export default function ContractsPage() {
     : "";
   const previewContractHtml = previewDraft
     ? renderContractGeneralPreviewHtml(previewDraft.payload)
+    : "";
+  const previewContractModalHtml = previewContractText
+    ? renderPlainPreviewHtml(previewContractText)
     : "";
   const previewCedulaIssues = previewMember ? getCedulaBlockingIssues(previewMember) : [];
   const previewPassportPending = previewMember ? getPassportPendingItems(previewMember) : [];
@@ -1200,6 +1276,9 @@ export default function ContractsPage() {
         clientDate: annexDraft.payload.signatures.clientDate,
         travelers: insuranceAnnexTravelers,
       })
+    : "";
+  const annexPreviewModalHtml = annexPreviewText
+    ? renderPlainPreviewHtml(annexPreviewText)
     : "";
 
   const exonerationTravelers = exonerationMember
@@ -1859,11 +1938,11 @@ export default function ContractsPage() {
             </div>
           </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={closeItineraryDialog}>
+          <DialogFooter className="flex flex-wrap gap-2 sm:justify-end">
+            <Button type="button" size="sm" variant="outline" onClick={closeItineraryDialog}>
               Cancelar
             </Button>
-            <Button type="button" onClick={saveItineraryDraft}>
+            <Button type="button" size="sm" onClick={saveItineraryDraft}>
               Guardar itinerario
             </Button>
           </DialogFooter>
@@ -1871,15 +1950,16 @@ export default function ContractsPage() {
       </Dialog>
 
       <Dialog open={previewDialog.open} onOpenChange={(next) => (next ? null : closePreviewDialog())}>
-        <DialogContent className="max-h-[75vh] w-[98vw] max-w-[110rem] overflow-y-auto overflow-x-hidden">
+        <DialogContent className="flex h-[88vh] w-[98vw] max-w-[110rem] flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>
               Contrato {previewMember ? `· ${previewMember.fullName}` : ""}
             </DialogTitle>
           </DialogHeader>
 
+          <div className="flex-1 overflow-y-auto pr-1">
           {previewDraft ? (
-            <div className="space-y-3">
+            <div className="space-y-3 pb-2">
               {previewDraft.missingFields.length > 0 ? (
                 <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
                   <p className="font-semibold">Campos pendientes antes de enviar a firma:</p>
@@ -1962,30 +2042,25 @@ export default function ContractsPage() {
                 Estado actual: <span className="font-semibold">{getWorkflowStatusLabel(previewMember?.contractsWorkflowStatus)}</span>
               </div>
 
-              <div className="relative rounded-md border border-slate-200 bg-slate-50 p-3">
-                <img
-                  src="/logo/logo-lucitour.png"
-                  alt="Logo Lucitours"
-                  className="absolute right-3 top-3 h-10 w-auto object-contain"
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <iframe
+                  title="Vista previa contrato"
+                  srcDoc={previewContractModalHtml}
+                  className="h-[50vh] w-full rounded-md border border-slate-200 bg-white"
                 />
-                <div className="pt-12">
-                  <iframe
-                    title="Vista previa contrato"
-                    srcDoc={previewContractHtml}
-                    className="h-[65vh] w-full rounded-md border border-slate-200 bg-white"
-                  />
-                </div>
               </div>
             </div>
           ) : (
             <p className="text-sm text-slate-600">No se pudo generar el contrato.</p>
           )}
+          </div>
 
-          <DialogFooter>
+          <DialogFooter className="flex flex-wrap gap-2 sm:justify-end">
             {previewMember && previewDraft ? (
               <>
                 <Button
                   type="button"
+                  size="sm"
                   variant="outline"
                   onClick={() => void downloadContractPreview(previewMember, previewContractText)}
                   disabled={
@@ -2003,6 +2078,7 @@ export default function ContractsPage() {
                 </Button>
                 <Button
                   type="button"
+                  size="sm"
                   variant="outline"
                   onClick={() => void emailContractPreview(previewMember, previewContractText)}
                   disabled={
@@ -2018,6 +2094,7 @@ export default function ContractsPage() {
                 </Button>
                 <Button
                   type="button"
+                  size="sm"
                   variant="outline"
                   onClick={() => openPrintableDocument(previewContractHtml)}
                   disabled={
@@ -2029,6 +2106,7 @@ export default function ContractsPage() {
                 </Button>
                 <Button
                   type="button"
+                  size="sm"
                   variant="outline"
                   onClick={() =>
                     void handleStatusChange(previewMember, ContractsWorkflowStatus.SENT_TO_SIGN)
@@ -2045,6 +2123,7 @@ export default function ContractsPage() {
                 </Button>
                 <Button
                   type="button"
+                  size="sm"
                   onClick={() =>
                     void handleStatusChange(previewMember, ContractsWorkflowStatus.APPROVED)
                   }
@@ -2058,7 +2137,7 @@ export default function ContractsPage() {
                 </Button>
               </>
             ) : null}
-            <Button type="button" variant="outline" onClick={closePreviewDialog}>
+            <Button type="button" size="sm" variant="outline" onClick={closePreviewDialog}>
               Cerrar
             </Button>
           </DialogFooter>
@@ -2066,15 +2145,16 @@ export default function ContractsPage() {
       </Dialog>
 
       <Dialog open={annexDialog.open} onOpenChange={(next) => (next ? null : closeAnnexDialog())}>
-        <DialogContent className="max-h-[75vh] w-[98vw] max-w-[110rem] overflow-y-auto overflow-x-hidden">
+        <DialogContent className="flex h-[88vh] w-[98vw] max-w-[110rem] flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>
               Anexo de seguro (solo compra con Lucitours) {annexMember ? `· ${annexMember.fullName}` : ""}
             </DialogTitle>
           </DialogHeader>
 
+          <div className="flex-1 overflow-y-auto pr-1">
           {annexMember && annexTrip ? (
-            <div className="space-y-3">
+            <div className="space-y-3 pb-2">
               {isAnnexPastCutoff(annexTrip) ? (
                 <div className="rounded-md border border-rose-300 bg-rose-50 p-3 text-xs text-rose-700">
                   La ventana de actualizacion del anexo de seguro ya vencio (48h antes del inicio del tour).
@@ -2119,8 +2199,8 @@ export default function ContractsPage() {
                 <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                   <iframe
                     title="Vista previa anexo de seguro"
-                    srcDoc={annexPreviewHtml}
-                    className="h-[52vh] w-full rounded-md border border-slate-200 bg-white"
+                    srcDoc={annexPreviewModalHtml}
+                    className="h-[50vh] w-full rounded-md border border-slate-200 bg-white"
                   />
                 </div>
               ) : (
@@ -2132,12 +2212,14 @@ export default function ContractsPage() {
           ) : (
             <p className="text-sm text-slate-600">No se pudo generar el anexo.</p>
           )}
+          </div>
 
-          <DialogFooter>
+          <DialogFooter className="flex flex-wrap gap-2 sm:justify-end">
             {annexMember && annexTrip ? (
               <>
                 <Button
                   type="button"
+                  size="sm"
                   variant="outline"
                   onClick={() => void downloadAnnexPreview(annexMember, annexPreviewText)}
                   disabled={
@@ -2154,6 +2236,7 @@ export default function ContractsPage() {
                 </Button>
                 <Button
                   type="button"
+                  size="sm"
                   variant="outline"
                   onClick={() => void emailAnnexPreview(annexMember, annexPreviewText)}
                   disabled={
@@ -2169,6 +2252,7 @@ export default function ContractsPage() {
                 </Button>
                 <Button
                   type="button"
+                  size="sm"
                   variant="outline"
                   onClick={() => openPrintableDocument(annexPreviewHtml)}
                   disabled={
@@ -2180,6 +2264,7 @@ export default function ContractsPage() {
                 </Button>
                 <Button
                   type="button"
+                  size="sm"
                   variant="outline"
                   onClick={() => sendAnnexToSign(annexMember, annexTrip)}
                   disabled={
@@ -2192,6 +2277,7 @@ export default function ContractsPage() {
                 </Button>
                 <Button
                   type="button"
+                  size="sm"
                   onClick={() => markAnnexSigned(annexMember, annexTrip)}
                   disabled={
                     insuranceAnnexTravelers.length === 0 ||
@@ -2204,7 +2290,7 @@ export default function ContractsPage() {
                 </Button>
               </>
             ) : null}
-            <Button type="button" variant="outline" onClick={closeAnnexDialog}>
+            <Button type="button" size="sm" variant="outline" onClick={closeAnnexDialog}>
               Cerrar
             </Button>
           </DialogFooter>
@@ -2215,15 +2301,16 @@ export default function ContractsPage() {
         open={exonerationDialog.open}
         onOpenChange={(next) => (next ? null : closeExonerationDialog())}
       >
-        <DialogContent className="max-h-[75vh] w-[98vw] max-w-[110rem] overflow-y-auto overflow-x-hidden">
+        <DialogContent className="flex h-[88vh] w-[98vw] max-w-[110rem] flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>
               Anexos de exoneracion {exonerationMember ? `· ${exonerationMember.fullName}` : ""}
             </DialogTitle>
           </DialogHeader>
 
+          <div className="flex-1 overflow-y-auto pr-1">
           {exonerationMember && exonerationTrip ? (
-            <div className="space-y-3">
+            <div className="space-y-3 pb-2">
               {isAnnexPastCutoff(exonerationTrip) ? (
                 <div className="rounded-md border border-rose-300 bg-rose-50 p-3 text-xs text-rose-700">
                   La ventana de actualizacion del anexo de exoneracion ya vencio (48h antes del inicio del tour).
@@ -2288,8 +2375,8 @@ export default function ContractsPage() {
                       <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
                         <iframe
                           title={`Vista previa exoneracion ${annex.annexNumber}`}
-                          srcDoc={annex.previewHtml}
-                          className="h-[44vh] w-full rounded-md border border-slate-200 bg-white"
+                          srcDoc={renderPlainPreviewHtml(annex.previewText)}
+                          className="h-[40vh] w-full rounded-md border border-slate-200 bg-white"
                         />
                       </div>
 
@@ -2382,9 +2469,10 @@ export default function ContractsPage() {
           ) : (
             <p className="text-sm text-slate-600">No se pudo generar las exoneraciones.</p>
           )}
+          </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={closeExonerationDialog}>
+          <DialogFooter className="flex flex-wrap gap-2 sm:justify-end">
+            <Button type="button" size="sm" variant="outline" onClick={closeExonerationDialog}>
               Cerrar
             </Button>
           </DialogFooter>
@@ -2395,15 +2483,16 @@ export default function ContractsPage() {
         open={minorPermitDialog.open}
         onOpenChange={(next) => (next ? null : closeMinorPermitDialog())}
       >
-        <DialogContent className="max-h-[75vh] w-[98vw] max-w-[110rem] overflow-y-auto overflow-x-hidden">
+        <DialogContent className="flex h-[88vh] w-[98vw] max-w-[110rem] flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>
               Anexos de autorizacion para menor {minorPermitMember ? `· ${minorPermitMember.fullName}` : ""}
             </DialogTitle>
           </DialogHeader>
 
+          <div className="flex-1 overflow-y-auto pr-1">
           {minorPermitMember && minorPermitTrip ? (
-            <div className="space-y-3">
+            <div className="space-y-3 pb-2">
               {isAnnexPastCutoff(minorPermitTrip) ? (
                 <div className="rounded-md border border-rose-300 bg-rose-50 p-3 text-xs text-rose-700">
                   La ventana de actualizacion del anexo de menor ya vencio (48h antes del inicio del tour).
@@ -2550,8 +2639,8 @@ export default function ContractsPage() {
                       <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
                         <iframe
                           title={`Vista previa anexo menor ${annex.annexNumber}`}
-                          srcDoc={annex.previewHtml}
-                          className="h-[44vh] w-full rounded-md border border-slate-200 bg-white"
+                          srcDoc={renderPlainPreviewHtml(annex.previewText)}
+                          className="h-[40vh] w-full rounded-md border border-slate-200 bg-white"
                         />
                       </div>
                     </div>
@@ -2566,9 +2655,10 @@ export default function ContractsPage() {
           ) : (
             <p className="text-sm text-slate-600">No se pudo generar el anexo de menor.</p>
           )}
+          </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={closeMinorPermitDialog}>
+          <DialogFooter className="flex flex-wrap gap-2 sm:justify-end">
+            <Button type="button" size="sm" variant="outline" onClick={closeMinorPermitDialog}>
               Cerrar
             </Button>
           </DialogFooter>
@@ -2576,15 +2666,16 @@ export default function ContractsPage() {
       </Dialog>
 
       <Dialog open={documentsDialog.open} onOpenChange={(next) => (next ? null : closeDocumentsDialog())}>
-        <DialogContent className="max-h-[75vh] w-[96vw] max-w-5xl overflow-y-auto overflow-x-hidden">
+        <DialogContent className="flex h-[88vh] w-[96vw] max-w-5xl flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>
               Documentos recibidos {documentsMember ? `· ${documentsMember.fullName}` : ""}
             </DialogTitle>
           </DialogHeader>
 
+          <div className="flex-1 overflow-y-auto pr-1">
           {documentsMember ? (
-            <div className="space-y-4 text-xs">
+            <div className="space-y-4 pb-2 text-xs">
               <div className="grid gap-2 md:grid-cols-4">
                 <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
                   <p className="font-semibold text-slate-700">Identificaciones</p>
@@ -2737,6 +2828,18 @@ export default function ContractsPage() {
                           Revisado: {formatDateTime(doc.reviewedAt)}
                         </p>
                       ) : null}
+
+                      {documentSaveStateById[doc.id]?.state === "saving" ? (
+                        <p className="mt-1 text-[11px] text-sky-700">Guardando cambios...</p>
+                      ) : null}
+                      {documentSaveStateById[doc.id]?.state === "saved" ? (
+                        <p className="mt-1 text-[11px] text-emerald-700">Guardado</p>
+                      ) : null}
+                      {documentSaveStateById[doc.id]?.state === "error" ? (
+                        <p className="mt-1 text-[11px] text-rose-700">
+                          {documentSaveStateById[doc.id]?.message || "No se pudo guardar."}
+                        </p>
+                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -2745,9 +2848,10 @@ export default function ContractsPage() {
           ) : (
             <p className="text-sm text-slate-600">No se pudo cargar la informacion de documentos.</p>
           )}
+          </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={closeDocumentsDialog}>
+          <DialogFooter className="flex flex-wrap gap-2 sm:justify-end">
+            <Button type="button" size="sm" variant="outline" onClick={closeDocumentsDialog}>
               Cerrar
             </Button>
           </DialogFooter>
@@ -2755,14 +2859,14 @@ export default function ContractsPage() {
       </Dialog>
 
       <Dialog open={luggageDialog.open} onOpenChange={(next) => (next ? null : closeLuggageDialog())}>
-        <DialogContent className="max-h-[65vh] w-[92vw] max-w-3xl overflow-y-auto overflow-x-hidden">
+        <DialogContent className="flex h-[72vh] w-[92vw] max-w-3xl flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>
               Equipaje permitido {luggageDialog.member ? `· ${luggageDialog.member.fullName}` : ""}
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-2">
+          <div className="flex-1 space-y-2 overflow-y-auto pr-1">
             <p className="text-xs text-slate-600">
               Este texto se inserta en la clausula SETIMO del contrato para este pasajero.
             </p>
@@ -2775,11 +2879,11 @@ export default function ContractsPage() {
             />
           </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={closeLuggageDialog}>
+          <DialogFooter className="flex flex-wrap gap-2 sm:justify-end">
+            <Button type="button" size="sm" variant="outline" onClick={closeLuggageDialog}>
               Cancelar
             </Button>
-            <Button type="button" onClick={saveLuggageDraft}>
+            <Button type="button" size="sm" onClick={saveLuggageDraft}>
               Guardar equipaje
             </Button>
           </DialogFooter>
