@@ -29,15 +29,12 @@ import {
 } from "@/lib/contracts/renderContractTemplate";
 import {
   renderInsuranceAnnexPreview,
-  renderInsuranceAnnexPreviewHtml,
 } from "@/lib/contracts/renderInsuranceAnnexTemplate";
 import {
   renderInsuranceExonerationPreview,
-  renderInsuranceExonerationPreviewHtml,
 } from "@/lib/contracts/renderInsuranceExonerationTemplate";
 import {
   renderMinorPermitAnnexPreview,
-  renderMinorPermitAnnexPreviewHtml,
 } from "@/lib/contracts/renderMinorPermitAnnexTemplate";
 
 type ItineraryItem = { date: string; activity: string };
@@ -778,7 +775,7 @@ export default function ContractsPage() {
 
     const drawPageChrome = (pageNumber: number) => {
       if (logoDataUrl) {
-        pdf.addImage(logoDataUrl, "PNG", marginX, 14, 110, 40);
+        pdf.addImage(logoDataUrl, "PNG", marginX, 14, 77, 28);
       }
 
       pdf.setFont("helvetica", "bold");
@@ -885,22 +882,6 @@ export default function ContractsPage() {
     setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
   };
 
-  const openPrintableDocument = (html: string) => {
-    if (!html.trim()) {
-      return;
-    }
-
-    const popup = window.open("", "_blank", "noopener,noreferrer");
-    if (!popup) {
-      return;
-    }
-
-    popup.document.open();
-    popup.document.write(html);
-    popup.document.close();
-    popup.focus();
-  };
-
   const sendPdfByEmail = async (
     member: TripMember,
     params: {
@@ -996,7 +977,7 @@ export default function ContractsPage() {
     if (!pdfBytes) {
       return;
     }
-    await sendPdfByEmail(member, {
+    const sent = await sendPdfByEmail(member, {
       busyKey: `annex:${member.id}`,
       subject: `Anexo de seguro para firma · ${member.fullName}`,
       messageText:
@@ -1004,6 +985,16 @@ export default function ContractsPage() {
       fileName: `anexo-seguro-${safeName}.pdf`,
       pdfBytes,
     });
+
+    if (sent) {
+      setAnnexStatusByMember((prev) => ({
+        ...prev,
+        [member.id]: {
+          sentAt: prev[member.id]?.sentAt ?? new Date().toISOString(),
+          signedAt: prev[member.id]?.signedAt ?? null,
+        },
+      }));
+    }
   };
 
   const downloadExonerationPreview = async (
@@ -1032,7 +1023,7 @@ export default function ContractsPage() {
     if (!pdfBytes) {
       return;
     }
-    await sendPdfByEmail(member, {
+    const sent = await sendPdfByEmail(member, {
       busyKey: `exoneration:${annexNumber}`,
       subject: `Anexo de exoneracion para firma · ${travelerName}`,
       messageText:
@@ -1040,6 +1031,16 @@ export default function ContractsPage() {
       fileName: `anexo-exoneracion-${safeMember}-${safeTraveler}.pdf`,
       pdfBytes,
     });
+
+    if (sent) {
+      setExonerationStatusByAnnex((prev) => ({
+        ...prev,
+        [annexNumber]: {
+          sentAt: prev[annexNumber]?.sentAt ?? new Date().toISOString(),
+          signedAt: prev[annexNumber]?.signedAt ?? null,
+        },
+      }));
+    }
   };
 
   const downloadMinorPermitPreview = async (
@@ -1068,7 +1069,7 @@ export default function ContractsPage() {
     if (!pdfBytes) {
       return;
     }
-    await sendPdfByEmail(member, {
+    const sent = await sendPdfByEmail(member, {
       busyKey: `minor:${annexNumber}`,
       subject: `Anexo de menor para firma · ${minorName}`,
       messageText:
@@ -1076,6 +1077,16 @@ export default function ContractsPage() {
       fileName: `anexo-menor-${safeMember}-${safeMinor}.pdf`,
       pdfBytes,
     });
+
+    if (sent) {
+      setMinorPermitStatusByAnnex((prev) => ({
+        ...prev,
+        [annexNumber]: {
+          sentAt: prev[annexNumber]?.sentAt ?? new Date().toISOString(),
+          signedAt: prev[annexNumber]?.signedAt ?? null,
+        },
+      }));
+    }
   };
 
   const openDocumentsDialog = (memberId: string) => {
@@ -1113,19 +1124,6 @@ export default function ContractsPage() {
     setMinorPermitDialog({ open: false, memberId: null });
   };
 
-  const sendAnnexToSign = (member: TripMember, trip?: Trip) => {
-    if (isAnnexPastCutoff(trip)) {
-      return;
-    }
-    setAnnexStatusByMember((prev) => ({
-      ...prev,
-      [member.id]: {
-        sentAt: prev[member.id]?.sentAt ?? new Date().toISOString(),
-        signedAt: prev[member.id]?.signedAt ?? null,
-      },
-    }));
-  };
-
   const markAnnexSigned = (member: TripMember, trip?: Trip) => {
     if (isAnnexPastCutoff(trip)) {
       return;
@@ -1142,19 +1140,6 @@ export default function ContractsPage() {
     });
   };
 
-  const sendExonerationToSign = (annexNumber: string, trip?: Trip) => {
-    if (isAnnexPastCutoff(trip)) {
-      return;
-    }
-    setExonerationStatusByAnnex((prev) => ({
-      ...prev,
-      [annexNumber]: {
-        sentAt: prev[annexNumber]?.sentAt ?? new Date().toISOString(),
-        signedAt: prev[annexNumber]?.signedAt ?? null,
-      },
-    }));
-  };
-
   const markExonerationSigned = (annexNumber: string, trip?: Trip) => {
     if (isAnnexPastCutoff(trip)) {
       return;
@@ -1169,19 +1154,6 @@ export default function ContractsPage() {
         },
       };
     });
-  };
-
-  const sendMinorPermitToSign = (annexNumber: string, trip?: Trip) => {
-    if (isAnnexPastCutoff(trip)) {
-      return;
-    }
-    setMinorPermitStatusByAnnex((prev) => ({
-      ...prev,
-      [annexNumber]: {
-        sentAt: prev[annexNumber]?.sentAt ?? new Date().toISOString(),
-        signedAt: prev[annexNumber]?.signedAt ?? null,
-      },
-    }));
   };
 
   const markMinorPermitSigned = (annexNumber: string, trip?: Trip) => {
@@ -1312,29 +1284,6 @@ export default function ContractsPage() {
       traveler.wantsInsuranceWithLucitours === true && traveler.hasOwnInsurance !== true,
   );
 
-  const annexPreviewHtml = annexMember && annexDraft && insuranceAnnexTravelers.length > 0
-    ? renderInsuranceAnnexPreviewHtml({
-        contractNumber: annexDraft.payload.contract.number,
-        annexNumber: buildInsuranceAnnexNumber(annexDraft.payload.contract.number),
-        clientFullName: annexMember.fullName,
-        clientIdType: toContractIdTypeLabel(annexMember.identificationTypeId),
-        clientIdNumber: annexMember.identification,
-        tripDestination: annexDraft.payload.trip.destinationCountry,
-        tripStartDate: annexDraft.payload.trip.startDate,
-        tripEndDate: annexDraft.payload.trip.endDate,
-        annexIssuedAt: formatIsoDate(new Date().toISOString()),
-        annexSentAt: annexStatusByMember[annexMember.id]?.sentAt
-          ? formatDateTime(annexStatusByMember[annexMember.id]?.sentAt)
-          : "",
-        annexCutoffAt: formatIsoDate(getAnnexCutoffAt(annexTrip)),
-        includeEdwin: annexDraft.payload.lucitours.signatories.includeEdwin,
-        includeErick: annexDraft.payload.lucitours.signatories.includeErick,
-        lucitoursEdwinDate: annexDraft.payload.signatures.lucitoursEdwinDate,
-        lucitoursErickDate: annexDraft.payload.signatures.lucitoursErickDate,
-        clientDate: annexDraft.payload.signatures.clientDate,
-        travelers: insuranceAnnexTravelers,
-      })
-    : "";
   const annexPreviewText = annexMember && annexDraft && insuranceAnnexTravelers.length > 0
     ? renderInsuranceAnnexPreview({
         contractNumber: annexDraft.payload.contract.number,
@@ -1377,29 +1326,6 @@ export default function ContractsPage() {
             exonerationDraft.payload.contract.number,
             traveler.travelerName,
           ),
-          previewHtml: renderInsuranceExonerationPreviewHtml({
-            contractNumber: exonerationDraft.payload.contract.number,
-            annexNumber: buildExonerationAnnexNumber(
-              exonerationDraft.payload.contract.number,
-              traveler.travelerName,
-            ),
-            tripDestination: exonerationDraft.payload.trip.destinationCountry,
-            tripStartDate: exonerationDraft.payload.trip.startDate,
-            tripEndDate: exonerationDraft.payload.trip.endDate,
-            clientFullName: exonerationMember.fullName,
-            travelerName: traveler.travelerName,
-            travelerRole: traveler.travelerRole,
-            travelerIdType: traveler.travelerIdType,
-            travelerIdNumber: traveler.travelerIdNumber,
-            emergencyContactName: traveler.emergencyContactName,
-            emergencyContactPhone: traveler.emergencyContactPhone,
-            hasOwnInsurance: traveler.hasOwnInsurance,
-            includeEdwin: exonerationDraft.payload.lucitours.signatories.includeEdwin,
-            includeErick: exonerationDraft.payload.lucitours.signatories.includeErick,
-            lucitoursEdwinDate: exonerationDraft.payload.signatures.lucitoursEdwinDate,
-            lucitoursErickDate: exonerationDraft.payload.signatures.lucitoursErickDate,
-            issuedAt: formatIsoDate(new Date().toISOString()),
-          }),
           previewText: renderInsuranceExonerationPreview({
             contractNumber: exonerationDraft.payload.contract.number,
             annexNumber: buildExonerationAnnexNumber(
@@ -1452,25 +1378,6 @@ export default function ContractsPage() {
             guardianIdNumber: minorPermitMember.identification,
             guardianPhone: companion.emergencyContactPhone || minorPermitMember.phone,
             hasSupportingPermit,
-            previewHtml: renderMinorPermitAnnexPreviewHtml({
-              contractNumber: minorPermitDraft.payload.contract.number,
-              annexNumber,
-              tripDestination: minorPermitDraft.payload.trip.destinationCountry,
-              tripStartDate: minorPermitDraft.payload.trip.startDate,
-              tripEndDate: minorPermitDraft.payload.trip.endDate,
-              clientFullName: minorPermitMember.fullName,
-              minorFullName: companion.fullName || "Acompanante menor",
-              minorIdType: toContractIdTypeLabel(
-                (companion as { identificationTypeId?: string }).identificationTypeId ??
-                  minorPermitMember.identificationTypeId,
-              ),
-              minorIdNumber: companion.identification,
-              guardianName: companion.emergencyContactName || minorPermitMember.fullName,
-              guardianIdType: toContractIdTypeLabel(minorPermitMember.identificationTypeId),
-              guardianIdNumber: minorPermitMember.identification,
-              guardianPhone: companion.emergencyContactPhone || minorPermitMember.phone,
-              issuedAt: formatIsoDate(new Date().toISOString()),
-            }),
             previewText: renderMinorPermitAnnexPreview({
               contractNumber: minorPermitDraft.payload.contract.number,
               annexNumber,
@@ -2295,39 +2202,15 @@ export default function ContractsPage() {
                   onClick={() => void emailAnnexPreview(annexMember, annexPreviewText)}
                   disabled={
                     insuranceAnnexTravelers.length === 0 ||
-                    !annexStatusByMember[annexMember.id]?.sentAt ||
+                    isAnnexPastCutoff(annexTrip) ||
+                    Boolean(annexStatusByMember[annexMember.id]?.sentAt) ||
                     !annexMember.email ||
                     emailBusyKey === `annex:${annexMember.id}`
                   }
                 >
                   {emailBusyKey === `annex:${annexMember.id}`
                     ? "Enviando correo..."
-                    : "Enviar PDF por correo"}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => openPrintableDocument(annexPreviewHtml)}
-                  disabled={
-                    insuranceAnnexTravelers.length === 0 ||
-                    !annexStatusByMember[annexMember.id]?.sentAt
-                  }
-                >
-                  Abrir para imprimir
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => sendAnnexToSign(annexMember, annexTrip)}
-                  disabled={
-                    insuranceAnnexTravelers.length === 0 ||
-                    isAnnexPastCutoff(annexTrip) ||
-                    Boolean(annexStatusByMember[annexMember.id]?.sentAt)
-                  }
-                >
-                  Enviar a firma
+                    : "Enviar PDF a firmar"}
                 </Button>
                 <Button
                   type="button"
@@ -2438,18 +2321,6 @@ export default function ContractsPage() {
                         <Button
                           type="button"
                           size="sm"
-                          variant="outline"
-                          onClick={() => sendExonerationToSign(annex.annexNumber, exonerationTrip)}
-                          disabled={
-                            isAnnexPastCutoff(exonerationTrip) ||
-                            Boolean(exonerationStatusByAnnex[annex.annexNumber]?.sentAt)
-                          }
-                        >
-                          Enviar exoneracion a firma
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
                           onClick={() => markExonerationSigned(annex.annexNumber, exonerationTrip)}
                           disabled={
                             isAnnexPastCutoff(exonerationTrip) ||
@@ -2492,23 +2363,15 @@ export default function ContractsPage() {
                             )
                           }
                           disabled={
-                            !exonerationStatusByAnnex[annex.annexNumber]?.sentAt ||
+                            isAnnexPastCutoff(exonerationTrip) ||
+                            Boolean(exonerationStatusByAnnex[annex.annexNumber]?.sentAt) ||
                             !exonerationMember.email ||
                             emailBusyKey === `exoneration:${annex.annexNumber}`
                           }
                         >
                           {emailBusyKey === `exoneration:${annex.annexNumber}`
                             ? "Enviando..."
-                            : "Enviar PDF por correo"}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openPrintableDocument(annex.previewHtml)}
-                          disabled={!exonerationStatusByAnnex[annex.annexNumber]?.sentAt}
-                        >
-                          Abrir para imprimir
+                            : "Enviar PDF a firmar"}
                         </Button>
                       </div>
                     </div>
@@ -2616,18 +2479,6 @@ export default function ContractsPage() {
                         <Button
                           type="button"
                           size="sm"
-                          variant="outline"
-                          onClick={() => sendMinorPermitToSign(annex.annexNumber, minorPermitTrip)}
-                          disabled={
-                            isAnnexPastCutoff(minorPermitTrip) ||
-                            Boolean(minorPermitStatusByAnnex[annex.annexNumber]?.sentAt)
-                          }
-                        >
-                          Enviar anexo menor a firma
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
                           onClick={() => markMinorPermitSigned(annex.annexNumber, minorPermitTrip)}
                           disabled={
                             isAnnexPastCutoff(minorPermitTrip) ||
@@ -2670,23 +2521,15 @@ export default function ContractsPage() {
                             )
                           }
                           disabled={
-                            !minorPermitStatusByAnnex[annex.annexNumber]?.sentAt ||
+                            isAnnexPastCutoff(minorPermitTrip) ||
+                            Boolean(minorPermitStatusByAnnex[annex.annexNumber]?.sentAt) ||
                             !minorPermitMember.email ||
                             emailBusyKey === `minor:${annex.annexNumber}`
                           }
                         >
                           {emailBusyKey === `minor:${annex.annexNumber}`
                             ? "Enviando..."
-                            : "Enviar PDF por correo"}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openPrintableDocument(annex.previewHtml)}
-                          disabled={!minorPermitStatusByAnnex[annex.annexNumber]?.sentAt}
-                        >
-                          Abrir para imprimir
+                            : "Enviar PDF a firmar"}
                         </Button>
                       </div>
 
