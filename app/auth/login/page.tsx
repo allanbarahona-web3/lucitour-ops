@@ -20,7 +20,7 @@ const getOrgId = (): string => process.env.NEXT_PUBLIC_ORG_ID?.trim() || "lucito
 export default function LoginPage() {
   const router = useRouter();
   const { login, isAuthenticated, isReady } = useSession();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [requestingReset, setRequestingReset] = useState(false);
@@ -36,14 +36,14 @@ export default function LoginPage() {
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!email.trim() || !password.trim()) {
-      setError("Ingresa tu correo y tu clave.");
+    if (!identifier.trim() || !password.trim()) {
+      setError("Ingresa tu usuario/correo y tu clave.");
       return;
     }
 
     setError(null);
     setLoading(true);
-    const result = await login(email.trim(), password);
+    const result = await login(identifier.trim(), password);
     setLoading(false);
 
     if (!result.ok) {
@@ -133,14 +133,14 @@ export default function LoginPage() {
 
               <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-600">Correo</label>
+                  <label className="text-xs font-semibold text-slate-600">Usuario o correo</label>
                   <input
                     className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900"
-                    type="email"
-                    autoComplete="email"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    placeholder="usuario@lucitour.com"
+                    type="text"
+                    autoComplete="username"
+                    value={identifier}
+                    onChange={(event) => setIdentifier(event.target.value)}
+                    placeholder="usuario o usuario@lucitour.com"
                   />
                 </div>
                 <div className="space-y-1">

@@ -79,14 +79,16 @@ export class AuthService implements OnModuleInit {
     refreshToken: string;
     user: { id: string; email: string; fullName: string; roles: AppRole[] };
   }> {
-    const email = input.email.trim().toLowerCase();
+    const identifier = input.identifier.trim().toLowerCase();
+    const isEmailLogin = identifier.includes('@');
+    const usernamePrefix = isEmailLogin ? null : identifier;
 
     return this.prisma.withOrg(orgId, async (tx) => {
       const windowStart = new Date(Date.now() - LOGIN_WINDOW_MINUTES * 60 * 1000);
       const failedCount = await tx.authEvent.count({
         where: {
           orgId,
-          email,
+          email: identifier,
           eventType: AuthEventType.LOGIN_FAILED,
           createdAt: {
             gte: windowStart,
@@ -98,7 +100,7 @@ export class AuthService implements OnModuleInit {
       if (failedCount >= LOGIN_MAX_ATTEMPTS) {
         await this.createAuthEvent(tx, {
           orgId,
-          email,
+          email: identifier,
           eventType: AuthEventType.LOGIN_LOCKED,
           ipAddress: requestMeta.ipAddress,
           userAgent: requestMeta.userAgent,
@@ -106,15 +108,22 @@ export class AuthService implements OnModuleInit {
         throw new UnauthorizedException('Too many failed login attempts. Try again later.');
       }
 
-      const user = await tx.user.findFirst({
+      const matchingUsers = await tx.user.findMany({
         where: {
           orgId,
-          email,
+          email: isEmailLogin ? identifier : { startsWith: `${usernamePrefix}@` },
         },
         include: {
           roles: true,
         },
+        take: isEmailLogin ? 1 : 2,
       });
+
+      if (!isEmailLogin && matchingUsers.length > 1) {
+        throw new UnauthorizedException('Usuario ambiguo. Inicia sesion con correo completo.');
+      }
+
+      const user = matchingUsers[0];
 
       const passwordOk = user
         ? await argon2.verify(user.passwordHash, input.password).catch(() => false)
@@ -124,7 +133,7 @@ export class AuthService implements OnModuleInit {
         await this.createAuthEvent(tx, {
           orgId,
           userId: user?.id,
-          email,
+          email: identifier,
           eventType: AuthEventType.LOGIN_FAILED,
           ipAddress: requestMeta.ipAddress,
           userAgent: requestMeta.userAgent,
@@ -177,7 +186,7 @@ export class AuthService implements OnModuleInit {
       await this.createAuthEvent(tx, {
         orgId,
         userId: user.id,
-        email,
+        email: user.email,
         eventType: AuthEventType.LOGIN_SUCCESS,
         ipAddress: requestMeta.ipAddress,
         userAgent: requestMeta.userAgent,

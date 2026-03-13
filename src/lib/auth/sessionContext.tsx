@@ -65,7 +65,7 @@ interface SessionContextValue {
   removeUser: (userId: string) => void;
   isAuthenticated: boolean;
   isReady: boolean;
-  login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+  login: (identifier: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
 }
 
@@ -163,7 +163,7 @@ export const SessionProvider = ({ children }: SessionProviderProps) => {
     }
   };
 
-  const login = async (email: string, password: string): Promise<{ ok: boolean; error?: string }> => {
+  const login = async (identifier: string, password: string): Promise<{ ok: boolean; error?: string }> => {
     try {
       const response = await fetch(`${getApiBaseUrl()}/auth/login`, {
         method: "POST",
@@ -171,7 +171,7 @@ export const SessionProvider = ({ children }: SessionProviderProps) => {
           "Content-Type": "application/json",
           "x-org-id": getOrgId(),
         },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ identifier, password }),
       });
 
       if (!response.ok) {
