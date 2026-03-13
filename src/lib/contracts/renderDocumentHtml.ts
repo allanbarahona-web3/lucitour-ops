@@ -13,7 +13,7 @@ const DEFAULTS = {
   companyName: "VIAJES LUCITOURS AGENCIA DE VIAJES TURISMO INTERNACIONAL S. A.",
   companyId: "3-101-874546",
   companyPhone: "+506 6015-9906",
-  companyEmail: "lucitours1211@gmail.com",
+  companyEmail: "contratos@lucitour.com",
   canaturLabel: "AFILIADO A CANATUR",
 } as const;
 
@@ -223,7 +223,10 @@ export const renderBrandedDocumentHtml = (options: BrandedDocumentOptions): stri
       .document-body {
         padding: 0 14mm;
         font-size: 12.5px;
-        line-height: 1.55;
+        line-height: 1.52;
+        text-align: justify;
+        text-justify: inter-word;
+        hyphens: auto;
       }
 
       h1, h2, h3 {
@@ -249,6 +252,7 @@ export const renderBrandedDocumentHtml = (options: BrandedDocumentOptions): stri
 
       p {
         margin: 0 0 0.7em;
+        color: var(--ink);
       }
 
       ul, ol {

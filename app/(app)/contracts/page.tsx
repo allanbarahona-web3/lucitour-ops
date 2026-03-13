@@ -885,6 +885,8 @@ export default function ContractsPage() {
   const buildPdfFromText = async (title: string, content: string): Promise<Uint8Array | null> => {
     const normalizedContent = content
       .replace(/^[ \t]*#{1,6}[ \t]*/gm, "")
+      .replace(/\r\n/g, "\n")
+      .replace(/[ \t]+$/gm, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
 
@@ -915,12 +917,12 @@ export default function ContractsPage() {
     const pdf = new jsPDF({ unit: "pt", format: "a4" });
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const marginX = 42;
+    const marginX = 34;
     const headerHeight = 64;
     const footerHeight = 42;
-    const contentTop = headerHeight + 26;
+    const contentTop = headerHeight + 22;
     const contentBottom = pageHeight - footerHeight - 18;
-    const lineHeight = 14.5;
+    const lineHeight = 13.8;
     const logoDataUrl = await toDataUrl("/logo/logo-lucitour.png");
 
     const drawPageChrome = (pageNumber: number) => {
@@ -938,7 +940,7 @@ export default function ContractsPage() {
       pdf.setFontSize(8.5);
       pdf.text("3-101-874546", pageWidth - marginX, 36, { align: "right" });
       pdf.text("+506 6015-9906", pageWidth - marginX, 47, { align: "right" });
-      pdf.text("lucitours1211@gmail.com", pageWidth - marginX, 58, { align: "right" });
+      pdf.text("contratos@lucitour.com", pageWidth - marginX, 58, { align: "right" });
 
       pdf.setDrawColor(226, 232, 240);
       pdf.line(marginX, headerHeight, pageWidth - marginX, headerHeight);
@@ -971,39 +973,87 @@ export default function ContractsPage() {
     drawPageChrome(1);
 
     pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(11);
+    pdf.setFontSize(12);
     pdf.setTextColor(15, 23, 42);
     const titleLines = pdf.splitTextToSize(title, pageWidth - marginX * 2) as string[];
 
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(10);
-
     const maxTextWidth = pageWidth - marginX * 2;
-    const split = pdf.splitTextToSize(normalizedContent, maxTextWidth) as string[];
+    const isClauseHeading = (line: string) =>
+      /^[A-Z0-9ÁÉÍÓÚÜÑ\s]+:\s*.*$/.test(line) && line.length <= 150;
+
+    const blocks = normalizedContent
+      .split(/\n{2,}/)
+      .map((block) => block.trim())
+      .filter(Boolean);
 
     let y = contentTop;
 
     titleLines.forEach((line) => {
       pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(11);
+      pdf.setFontSize(12);
       pdf.text(line, marginX, y);
       y += lineHeight;
     });
 
-    y += 6;
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(10);
+    y += 8;
 
     let pageNumber = 1;
-    split.forEach((line) => {
-      if (y > contentBottom) {
-        pdf.addPage();
-        pageNumber += 1;
-        drawPageChrome(pageNumber);
-        y = contentTop;
+    const ensureSpace = (requiredHeight: number) => {
+      if (y + requiredHeight <= contentBottom) {
+        return;
       }
-      pdf.text(line, marginX, y);
-      y += lineHeight;
+      pdf.addPage();
+      pageNumber += 1;
+      drawPageChrome(pageNumber);
+      y = contentTop;
+    };
+
+    const renderWrappedLine = (textLine: string, style: "heading" | "normal") => {
+      const clean = textLine.trim();
+      if (!clean) {
+        y += lineHeight * 0.55;
+        return;
+      }
+
+      pdf.setFont("helvetica", style === "heading" ? "bold" : "normal");
+      pdf.setFontSize(style === "heading" ? 10.6 : 10.2);
+      pdf.setTextColor(15, 23, 42);
+
+      const lines = pdf.splitTextToSize(clean, maxTextWidth) as string[];
+      ensureSpace(lines.length * lineHeight + 4);
+      lines.forEach((line, idx) => {
+        const isLast = idx === lines.length - 1;
+        if (style === "normal" && !isLast) {
+          pdf.text(line, marginX, y, { maxWidth: maxTextWidth, align: "justify" });
+        } else {
+          pdf.text(line, marginX, y);
+        }
+        y += lineHeight;
+      });
+      y += 2;
+    };
+
+    blocks.forEach((block) => {
+      const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+      if (lines.length === 0) {
+        return;
+      }
+
+      const hasList = lines.some((line) => line.startsWith("-") || /^\d+\.\s+/.test(line));
+      if (hasList) {
+        lines.forEach((line) => {
+          renderWrappedLine(line, isClauseHeading(line) ? "heading" : "normal");
+        });
+        y += 2;
+        return;
+      }
+
+      const asSingleParagraph = lines.join(" ").replace(/\s+/g, " ").trim();
+      renderWrappedLine(
+        asSingleParagraph,
+        isClauseHeading(asSingleParagraph) ? "heading" : "normal",
+      );
+      y += 2;
     });
 
     return new Uint8Array(pdf.output("arraybuffer"));

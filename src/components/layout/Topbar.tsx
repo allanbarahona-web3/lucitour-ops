@@ -11,12 +11,25 @@ interface TopbarProps {
   user: User;
 }
 
-export const Topbar = ({ user }: TopbarProps) => (
-  <header className="flex w-full items-center justify-between gap-4 border-b border-slate-200/70 bg-white/80 px-4 py-3 shadow-sm backdrop-blur">
-    <div className="text-sm font-semibold text-slate-900">Dashboard</div>
-    <TopbarControls user={user} />
-  </header>
-);
+export const Topbar = ({ user }: TopbarProps) => {
+  const [exchangeRate, setExchangeRate] = useState<number | null>(null);
+
+  return (
+    <header className="relative flex w-full items-center justify-between gap-4 border-b border-slate-200/70 bg-white/80 px-4 py-3 shadow-sm backdrop-blur">
+      <div className="text-sm font-semibold text-slate-900">Dashboard</div>
+      <div className="pointer-events-none absolute left-1/2 -translate-x-1/2">
+        <div className="rounded-full border border-cyan-200 bg-cyan-50 px-4 py-1 text-xs font-semibold text-cyan-700">
+          Tipo cambio dia: {exchangeRate !== null ? `${exchangeRate.toFixed(2)}` : "-"}
+        </div>
+      </div>
+      <TopbarControls user={user} onExchangeRateChange={setExchangeRate} />
+    </header>
+  );
+};
+
+interface TopbarControlsProps extends TopbarProps {
+  onExchangeRateChange: (value: number | null) => void;
+}
 
 const roleStyles: Record<Role, string> = {
   ADMIN: "bg-emerald-100 text-emerald-800",
@@ -45,11 +58,10 @@ const formatDuration = (valueMs: number) => {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 };
 
-const TopbarControls = ({ user }: TopbarProps) => {
+const TopbarControls = ({ user, onExchangeRateChange }: TopbarControlsProps) => {
   const { users, setUserById, logout } = useSession();
   const repo = useMemo(() => getOpsRepo(), []);
   const [punches, setPunches] = useState<TimePunch[]>([]);
-  const [exchangeRate, setExchangeRate] = useState<number | null>(null);
   const [selectedType, setSelectedType] = useState<TimePunchType | "">("");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +92,7 @@ const TopbarControls = ({ user }: TopbarProps) => {
     const loadExchangeRate = async () => {
       const config = await repo.getBillingConfig();
       if (isActive) {
-        setExchangeRate(config.exchangeRate);
+        onExchangeRateChange(config.exchangeRate);
       }
     };
 
@@ -98,11 +110,12 @@ const TopbarControls = ({ user }: TopbarProps) => {
       isActive = false;
       clearInterval(interval);
       clearInterval(exchangeRateInterval);
+      onExchangeRateChange(null);
       if (typeof window !== "undefined") {
         window.removeEventListener("ops-time-punch", handlePunchEvent);
       }
     };
-  }, [repo]);
+  }, [onExchangeRateChange, repo]);
 
   useEffect(() => {
     const interval = setInterval(() => setNowTs(Date.now()), 1000);
@@ -237,9 +250,6 @@ const TopbarControls = ({ user }: TopbarProps) => {
       </div>
       <div className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[currentStatus]}`}>
         {currentStatus}
-      </div>
-      <div className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-cyan-700">
-        Tipo cambio dia: {exchangeRate !== null ? `${exchangeRate.toFixed(2)}` : "-"}
       </div>
       <div className="hidden items-center gap-3 text-xs text-slate-600 md:flex">
         <span>Working: {formatDuration(timeTotals.workingMs)}</span>
