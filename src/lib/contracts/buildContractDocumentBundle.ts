@@ -1,4 +1,3 @@
-import { identificationTypes } from "@/lib/data/catalogs";
 import { mapTripMemberToContractDraft } from "@/lib/contracts/contractMapper";
 import {
   renderContractGeneralPreview,
@@ -8,7 +7,7 @@ import {
   renderMinorPermitAnnexPreview,
   renderMinorPermitAnnexPreviewHtml,
 } from "@/lib/contracts/renderMinorPermitAnnexTemplate";
-import type { Companion, TripMember } from "@/lib/types/ops";
+import type { CatalogItem, Companion, TripMember } from "@/lib/types/ops";
 
 interface TripSnapshot {
   name: string;
@@ -50,6 +49,8 @@ export interface BuildContractDocumentBundleInput {
   includeEdwin?: boolean;
   includeErick?: boolean;
   issuedAtIso?: string;
+  identificationTypes?: CatalogItem[];
+  nationalities?: CatalogItem[];
 }
 
 const sanitizeName = (value: string): string =>
@@ -72,8 +73,10 @@ const formatIsoDate = (value: string): string => {
   return date.toISOString().slice(0, 10);
 };
 
-const resolveIdTypeLabel = (identificationTypeId: string): string =>
-  identificationTypes.find((item) => item.id === identificationTypeId)?.name || "Identificacion";
+const resolveIdTypeLabel = (
+  identificationTypeId: string,
+  identificationTypes: CatalogItem[] = [],
+): string => identificationTypes.find((item) => item.id === identificationTypeId)?.name || "Identificacion";
 
 const toTravelerRoleLabel = (companion: Companion): string =>
   companion.isMinor ? "Menor" : "Acompanante";
@@ -103,6 +106,10 @@ export const buildContractDocumentBundle = (
       reservationMinPerPerson: 0,
     },
     {
+      catalogs: {
+        identificationTypes: input.identificationTypes,
+        nationalities: input.nationalities,
+      },
       lucitoursSignatories: {
         includeEdwin,
         includeErick,
@@ -127,7 +134,7 @@ export const buildContractDocumentBundle = (
     {
       name: input.member.fullName,
       role: "Titular",
-      idType: resolveIdTypeLabel(input.member.identificationTypeId),
+      idType: resolveIdTypeLabel(input.member.identificationTypeId, input.identificationTypes),
       idNumber: input.member.identification,
       emergencyName: input.member.emergencyContactName,
       emergencyPhone: input.member.emergencyContactPhone,
@@ -135,13 +142,13 @@ export const buildContractDocumentBundle = (
     ...input.member.companions.map((companion) => ({
       name: companion.fullName,
       role: toTravelerRoleLabel(companion),
-      idType: resolveIdTypeLabel(companion.identificationTypeId),
+      idType: resolveIdTypeLabel(companion.identificationTypeId, input.identificationTypes),
       idNumber: companion.identification,
       emergencyName: companion.emergencyContactName,
       emergencyPhone: companion.emergencyContactPhone,
       isMinor: companion.isMinor,
       guardianName: input.member.fullName,
-      guardianIdType: resolveIdTypeLabel(input.member.identificationTypeId),
+      guardianIdType: resolveIdTypeLabel(input.member.identificationTypeId, input.identificationTypes),
       guardianIdNumber: input.member.identification,
       guardianPhone: input.member.phone,
     })),
@@ -167,11 +174,13 @@ export const buildContractDocumentBundle = (
         minorIdType: traveler.idType,
         minorIdNumber: traveler.idNumber,
         guardianName: traveler.guardianName || input.member.fullName,
-        guardianIdType: traveler.guardianIdType || resolveIdTypeLabel(input.member.identificationTypeId),
+        guardianIdType:
+          traveler.guardianIdType ||
+          resolveIdTypeLabel(input.member.identificationTypeId, input.identificationTypes),
         guardianIdNumber: traveler.guardianIdNumber || input.member.identification,
         guardianPhone: traveler.guardianPhone || input.member.phone,
         travelingAdultName: input.member.fullName,
-        travelingAdultIdType: resolveIdTypeLabel(input.member.identificationTypeId),
+        travelingAdultIdType: resolveIdTypeLabel(input.member.identificationTypeId, input.identificationTypes),
         travelingAdultIdNumber: input.member.identification,
         travelingAdultPhone: input.member.phone,
         issuedAt,
@@ -187,11 +196,13 @@ export const buildContractDocumentBundle = (
         minorIdType: traveler.idType,
         minorIdNumber: traveler.idNumber,
         guardianName: traveler.guardianName || input.member.fullName,
-        guardianIdType: traveler.guardianIdType || resolveIdTypeLabel(input.member.identificationTypeId),
+        guardianIdType:
+          traveler.guardianIdType ||
+          resolveIdTypeLabel(input.member.identificationTypeId, input.identificationTypes),
         guardianIdNumber: traveler.guardianIdNumber || input.member.identification,
         guardianPhone: traveler.guardianPhone || input.member.phone,
         travelingAdultName: input.member.fullName,
-        travelingAdultIdType: resolveIdTypeLabel(input.member.identificationTypeId),
+        travelingAdultIdType: resolveIdTypeLabel(input.member.identificationTypeId, input.identificationTypes),
         travelingAdultIdNumber: input.member.identification,
         travelingAdultPhone: input.member.phone,
         issuedAt,

@@ -289,7 +289,22 @@ export default function CatalogsPage() {
 
           <div className="space-y-3">
             <p className="text-xs font-semibold uppercase text-slate-500">Recargos globales (%)</p>
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="space-y-1">
+                <label className="text-xs text-slate-600">Tipo de cambio (CRC por USD)</label>
+                <input
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={configDraft?.exchangeRate ?? ""}
+                  onChange={(event) =>
+                    updateConfigDraft({
+                      exchangeRate: event.target.value === "" ? 0 : Number(event.target.value),
+                    })
+                  }
+                />
+              </div>
               <div className="space-y-1">
                 <label className="text-xs text-slate-600">Tarjetas</label>
                 <input

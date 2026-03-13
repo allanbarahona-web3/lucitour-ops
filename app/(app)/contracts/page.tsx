@@ -11,13 +11,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { getOpsRepo } from "@/lib/data/opsRepo";
-import { identificationTypes } from "@/lib/data/catalogs";
 import { useSession } from "@/lib/auth/sessionContext";
 import {
   ContractsWorkflowStatus,
   DocsStatus,
   PassportStatus,
   Role,
+  type CatalogItem,
   type AdultContractCase,
   type DocumentType,
   type DocumentUpload,
@@ -314,6 +314,8 @@ export default function ContractsPage() {
   const [itineraryByMember, setItineraryByMember] = useState<Record<string, ItineraryItem[]>>({});
   const [luggageTextByMember, setLuggageTextByMember] = useState<Record<string, string>>({});
   const [exchangeRate, setExchangeRate] = useState<number>(0);
+  const [identificationTypeCatalog, setIdentificationTypeCatalog] = useState<CatalogItem[]>([]);
+  const [nationalityCatalog, setNationalityCatalog] = useState<CatalogItem[]>([]);
   const [signerByMember, setSignerByMember] = useState<Record<string, LucitoursSigner>>({});
   const [previewDialog, setPreviewDialog] = useState<{ open: boolean; memberId: string | null }>({
     open: false,
@@ -351,9 +353,9 @@ export default function ContractsPage() {
 
   const identificationById = useMemo(() => {
     const map = new Map<string, string>();
-    identificationTypes.forEach((item) => map.set(item.id, item.name));
+    identificationTypeCatalog.forEach((item) => map.set(item.id, item.name));
     return map;
-  }, []);
+  }, [identificationTypeCatalog]);
 
   const toContractIdTypeLabel = (identificationTypeId: string) => {
     const raw = (identificationById.get(identificationTypeId) || "").toLowerCase();
@@ -519,10 +521,12 @@ export default function ContractsPage() {
 
   const loadQueue = async () => {
     setIsLoading(true);
-    const [queueMembers, trips, billingConfig] = await Promise.all([
+    const [queueMembers, trips, billingConfig, idTypes, nationalities] = await Promise.all([
       repo.listContractsQueue(),
       repo.listTrips(),
       repo.getBillingConfig(),
+      repo.listCatalog("identificationTypes"),
+      repo.listCatalog("nationalities"),
     ]);
 
     const nextTripMap = trips.reduce<Record<string, Trip>>((acc, trip) => {
@@ -533,6 +537,8 @@ export default function ContractsPage() {
     setTripMap(nextTripMap);
     setItems(queueMembers);
     setExchangeRate(billingConfig.exchangeRate);
+    setIdentificationTypeCatalog(idTypes);
+    setNationalityCatalog(nationalities);
     setIsLoading(false);
   };
 
@@ -1260,6 +1266,10 @@ export default function ContractsPage() {
         requireManualItinerary: true,
         allowedLuggageText: luggageTextByMember[previewMemberForContract.id],
         exchangeRate,
+        catalogs: {
+          identificationTypes: identificationTypeCatalog,
+          nationalities: nationalityCatalog,
+        },
         lucitoursSignatories: signerFlags(signerByMember[previewMemberForContract.id] ?? "none"),
       })
     : null;
@@ -1308,6 +1318,10 @@ export default function ContractsPage() {
         requireManualItinerary: true,
         allowedLuggageText: luggageTextByMember[minorPermitMember.id],
         exchangeRate,
+        catalogs: {
+          identificationTypes: identificationTypeCatalog,
+          nationalities: nationalityCatalog,
+        },
         lucitoursSignatories: signerFlags(signerByMember[minorPermitMember.id] ?? "none"),
       })
     : null;
@@ -1619,6 +1633,10 @@ export default function ContractsPage() {
                   requireManualItinerary: true,
                   allowedLuggageText: luggageTextByMember[member.id],
                   exchangeRate,
+                  catalogs: {
+                    identificationTypes: identificationTypeCatalog,
+                    nationalities: nationalityCatalog,
+                  },
                   lucitoursSignatories: signerFlags(signerByMember[member.id] ?? "none"),
                 });
                 const isReady = draft.missingFields.length === 0;

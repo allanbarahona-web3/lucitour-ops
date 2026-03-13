@@ -1,5 +1,4 @@
-import { identificationTypes, nationalities } from "@/lib/data/catalogs";
-import type { MaritalStatus, Trip, TripMember } from "@/lib/types/ops";
+import type { CatalogItem, MaritalStatus, Trip, TripMember } from "@/lib/types/ops";
 
 export enum ContractClientIdType {
   CEDULA = "cedula",
@@ -94,6 +93,10 @@ export interface ContractDraftOverrides {
     includeEdwin: boolean;
     includeErick: boolean;
   };
+  catalogs?: {
+    identificationTypes?: CatalogItem[];
+    nationalities?: CatalogItem[];
+  };
 }
 
 const DEFAULT_ALLOWED_LUGGAGE_TEXT =
@@ -106,9 +109,14 @@ const maritalStatusLabel: Record<MaritalStatus, string> = {
   WIDOWED: "viudo/a",
 };
 
-const resolveIdType = (identificationTypeId: string): ContractClientIdType => {
+const resolveIdType = (
+  identificationTypeId: string,
+  identificationTypeCatalog: CatalogItem[] = [],
+): ContractClientIdType => {
   const name =
-    identificationTypes.find((item) => item.id === identificationTypeId)?.name.toLowerCase() ?? "";
+    identificationTypeCatalog
+      .find((item) => item.id === identificationTypeId)
+      ?.name.toLowerCase() ?? identificationTypeId.toLowerCase();
 
   if (name.includes("pasaporte")) {
     return ContractClientIdType.PASSPORT;
@@ -125,8 +133,10 @@ const idTypeLabelByValue: Record<ContractClientIdType, string> = {
   [ContractClientIdType.DIMEX]: "DIMEX",
 };
 
-const resolveNationality = (nationalityId: string): string =>
-  nationalities.find((item) => item.id === nationalityId)?.name ?? "";
+const resolveNationality = (
+  nationalityId: string,
+  nationalityCatalog: CatalogItem[] = [],
+): string => nationalityCatalog.find((item) => item.id === nationalityId)?.name ?? "";
 
 const toIsoDate = (raw: string): string => {
   if (!raw) {
@@ -171,15 +181,17 @@ export const mapTripMemberToContractDraft = (
   overrides: ContractDraftOverrides = {},
 ): ContractDraftResult => {
   const seats = Math.max(1, member.seats || 1);
-  const idType = resolveIdType(member.identificationTypeId);
-  const nationality = resolveNationality(member.nationalityId);
+  const identificationTypeCatalog = overrides.catalogs?.identificationTypes ?? [];
+  const nationalityCatalog = overrides.catalogs?.nationalities ?? [];
+  const idType = resolveIdType(member.identificationTypeId, identificationTypeCatalog);
+  const nationality = resolveNationality(member.nationalityId, nationalityCatalog);
 
   const resolveCompanionIdType = (companion: unknown): ContractClientIdType => {
     const maybeId =
       typeof companion === "object" && companion
         ? (companion as { identificationTypeId?: string }).identificationTypeId
         : "";
-    return maybeId ? resolveIdType(maybeId) : idType;
+    return maybeId ? resolveIdType(maybeId, identificationTypeCatalog) : idType;
   };
 
   const companions = member.companions.map((companion) => ({
