@@ -1015,12 +1015,14 @@ export default function ContractsPage() {
         return;
       }
 
+      const lines = pdf.splitTextToSize(clean, maxTextWidth) as string[];
+      ensureSpace(lines.length * lineHeight + 4);
+
+      // drawPageChrome resets typography/colors, so enforce paragraph style after paging.
       pdf.setFont("helvetica", style === "heading" ? "bold" : "normal");
       pdf.setFontSize(style === "heading" ? 10.6 : 10.2);
       pdf.setTextColor(15, 23, 42);
 
-      const lines = pdf.splitTextToSize(clean, maxTextWidth) as string[];
-      ensureSpace(lines.length * lineHeight + 4);
       lines.forEach((line, idx) => {
         const isLast = idx === lines.length - 1;
         if (style === "normal" && !isLast) {
@@ -1039,20 +1041,29 @@ export default function ContractsPage() {
         return;
       }
 
-      const hasList = lines.some((line) => line.startsWith("-") || /^\d+\.\s+/.test(line));
+      // Keep clause headers as standalone bold lines before compacting body paragraphs.
+      let bodyLines = [...lines];
+      if (isClauseHeading(bodyLines[0])) {
+        renderWrappedLine(bodyLines[0], "heading");
+        bodyLines = bodyLines.slice(1);
+      }
+
+      if (bodyLines.length === 0) {
+        y += 2;
+        return;
+      }
+
+      const hasList = bodyLines.some((line) => line.startsWith("-") || /^\d+\.\s+/.test(line));
       if (hasList) {
-        lines.forEach((line) => {
+        bodyLines.forEach((line) => {
           renderWrappedLine(line, isClauseHeading(line) ? "heading" : "normal");
         });
         y += 2;
         return;
       }
 
-      const asSingleParagraph = lines.join(" ").replace(/\s+/g, " ").trim();
-      renderWrappedLine(
-        asSingleParagraph,
-        isClauseHeading(asSingleParagraph) ? "heading" : "normal",
-      );
+      const asSingleParagraph = bodyLines.join(" ").replace(/\s+/g, " ").trim();
+      renderWrappedLine(asSingleParagraph, "normal");
       y += 2;
     });
 
