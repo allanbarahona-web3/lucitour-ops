@@ -3,7 +3,31 @@ node_modules
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
 dist
+
+# Secrets and private keys
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+secrets.json
+credentials.json
+service-account*.json
+
+# Local tooling and DB artifacts
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+*.tmp
 
 # Sensitive contract artifacts and drafts
 /private/contracts/
