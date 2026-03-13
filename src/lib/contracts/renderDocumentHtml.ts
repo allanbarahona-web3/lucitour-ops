@@ -166,13 +166,21 @@ export const renderBrandedDocumentHtml = (options: BrandedDocumentOptions): stri
         background: #fff;
         display: flex;
         justify-content: space-between;
-        align-items: flex-start;
+        align-items: center;
         gap: 10mm;
       }
 
+      .brand-mark {
+        width: 14mm;
+        height: 14mm;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
       .page-header img {
-        width: 44mm;
-        height: auto;
+        width: 100%;
+        height: 100%;
         object-fit: contain;
       }
 
@@ -286,7 +294,9 @@ export const renderBrandedDocumentHtml = (options: BrandedDocumentOptions): stri
   <body>
     <div class="sheet">
       <header class="page-header">
-        <img src="${escapeHtml(logoPath)}" alt="Logo Lucitours" />
+        <div class="brand-mark">
+          <img src="${escapeHtml(logoPath)}" alt="Logo Lucitours" />
+        </div>
         <div class="company">
           <div class="name">${escapeHtml(companyName)}</div>
           <div>${escapeHtml(companyId)}</div>

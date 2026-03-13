@@ -3,8 +3,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:fe": "next dev",
+    "dev:be": "pnpm --filter api start:dev",
+    "dev:all": "concurrently -n FE,BE -c cyan,green \"pnpm dev:fe\" \"pnpm dev:be\"",
     "build": "next build",
-    "start": "next start"
+    "build:fe": "next build",
+    "build:be": "pnpm --filter api build",
+    "start": "next start",
+    "start:be": "pnpm --filter api start:prod"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -27,6 +33,7 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.20",
+    "concurrently": "^9.2.1",
     "eslint": "^8.57.0",
     "eslint-config-next": "^14.2.5",
     "postcss": "^8.4.40",

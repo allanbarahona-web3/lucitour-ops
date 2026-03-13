@@ -924,10 +924,42 @@ export default function ContractsPage() {
     const contentBottom = pageHeight - footerHeight - 18;
     const lineHeight = 13.8;
     const logoDataUrl = await toDataUrl("/logo/logo-lucitour.png");
+    const logoBoxSize = 30;
+    const logoBoxY = 14;
+
+    const getLogoFit = () => {
+      if (!logoDataUrl) {
+        return null;
+      }
+      try {
+        const props = pdf.getImageProperties(logoDataUrl);
+        const widthRatio = logoBoxSize / props.width;
+        const heightRatio = logoBoxSize / props.height;
+        const scale = Math.min(widthRatio, heightRatio);
+        const drawWidth = props.width * scale;
+        const drawHeight = props.height * scale;
+        return {
+          x: marginX + (logoBoxSize - drawWidth) / 2,
+          y: logoBoxY + (logoBoxSize - drawHeight) / 2,
+          drawWidth,
+          drawHeight,
+        };
+      } catch {
+        return {
+          x: marginX,
+          y: logoBoxY,
+          drawWidth: logoBoxSize,
+          drawHeight: logoBoxSize,
+        };
+      }
+    };
 
     const drawPageChrome = (pageNumber: number) => {
       if (logoDataUrl) {
-        pdf.addImage(logoDataUrl, "PNG", marginX, 14, 77, 28);
+        const fit = getLogoFit();
+        if (fit) {
+          pdf.addImage(logoDataUrl, "PNG", fit.x, fit.y, fit.drawWidth, fit.drawHeight);
+        }
       }
 
       pdf.setFont("helvetica", "bold");
@@ -1109,9 +1141,15 @@ export default function ContractsPage() {
       return false;
     }
 
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+    if (!apiBaseUrl) {
+      window.alert("Falta configurar NEXT_PUBLIC_API_BASE_URL para enviar correos.");
+      return false;
+    }
+
     setEmailBusyKey(params.busyKey);
     try {
-      const response = await fetch("/api/contracts/send-pdf", {
+      const response = await fetch(`${apiBaseUrl}/contracts/send-pdf`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
