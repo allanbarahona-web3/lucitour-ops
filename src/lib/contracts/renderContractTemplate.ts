@@ -81,7 +81,6 @@ export const renderContractGeneralPreview = (payload: ContractPayload): string =
   out = renderBoolIf(out, "travelers.hasCompanions", data);
   out = renderBoolIf(out, "travelers.hasMinors", data);
   out = renderBoolIf(out, "sale.isResale", data);
-  out = renderBoolIf(out, "legal.applyExonerationAnnex", data);
   out = renderBoolIf(out, "lucitours.signatories.includeEdwin", data);
   out = renderBoolIf(out, "lucitours.signatories.includeErick", data);
 

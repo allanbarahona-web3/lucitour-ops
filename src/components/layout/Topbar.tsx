@@ -49,6 +49,7 @@ const TopbarControls = ({ user }: TopbarProps) => {
   const { users, setUserById, logout } = useSession();
   const repo = useMemo(() => getOpsRepo(), []);
   const [punches, setPunches] = useState<TimePunch[]>([]);
+  const [exchangeRate, setExchangeRate] = useState<number | null>(null);
   const [selectedType, setSelectedType] = useState<TimePunchType | "">("");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,8 +77,17 @@ const TopbarControls = ({ user }: TopbarProps) => {
       }
     };
 
+    const loadExchangeRate = async () => {
+      const config = await repo.getBillingConfig();
+      if (isActive) {
+        setExchangeRate(config.exchangeRate);
+      }
+    };
+
     void loadPunches();
+    void loadExchangeRate();
     const interval = setInterval(loadPunches, 10000);
+    const exchangeRateInterval = setInterval(loadExchangeRate, 30000);
     const handlePunchEvent = () => {
       void loadPunches();
     };
@@ -87,6 +97,7 @@ const TopbarControls = ({ user }: TopbarProps) => {
     return () => {
       isActive = false;
       clearInterval(interval);
+      clearInterval(exchangeRateInterval);
       if (typeof window !== "undefined") {
         window.removeEventListener("ops-time-punch", handlePunchEvent);
       }
@@ -226,6 +237,9 @@ const TopbarControls = ({ user }: TopbarProps) => {
       </div>
       <div className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[currentStatus]}`}>
         {currentStatus}
+      </div>
+      <div className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-cyan-700">
+        Tipo cambio dia: {exchangeRate !== null ? `${exchangeRate.toFixed(2)}` : "-"}
       </div>
       <div className="hidden items-center gap-3 text-xs text-slate-600 md:flex">
         <span>Working: {formatDuration(timeTotals.workingMs)}</span>

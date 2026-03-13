@@ -200,6 +200,27 @@ export interface Companion {
   emergencyContactName: string;
   emergencyContactPhone: string;
   specialSituations: string;
+  guardianFullName?: string;
+  guardianIdTypeId?: string;
+  guardianIdNumber?: string;
+  guardianPhone?: string;
+  guardianEmail?: string;
+  guardianRelationship?: string;
+  guardianAddress?: string;
+  guardianProfession?: string;
+  guardianMaritalStatus?: MaritalStatus | "";
+  travelingAdultCompanionId?: string;
+  travelingAdultName?: string;
+}
+
+export interface AdultContractCase {
+  travelerKey: string;
+  travelerName: string;
+  travelerEmail: string;
+  isTitular: boolean;
+  sentAt: string | null;
+  signedFileName: string | null;
+  signedUploadedAt: string | null;
 }
 
 export type TripStatus = "PLANNED" | "ACTIVE" | "COMPLETED" | "CANCELLED";
@@ -346,10 +367,7 @@ export interface TripMember {
   contractsStatusUpdatedAt: string | null;
   signedContractFileName?: string | null;
   signedContractUploadedAt?: string | null;
-  signedInsuranceAnnexFileName?: string | null;
-  signedInsuranceAnnexUploadedAt?: string | null;
-  signedExonerationAnnexFileName?: string | null;
-  signedExonerationAnnexUploadedAt?: string | null;
+  adultContractCases?: AdultContractCase[];
   signedMinorAnnexFileName?: string | null;
   signedMinorAnnexUploadedAt?: string | null;
   billingStatus: BillingStatus;

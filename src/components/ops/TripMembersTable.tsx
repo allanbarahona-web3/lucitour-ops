@@ -72,6 +72,7 @@ const isPending = (member: TripMember) =>
   member.itineraryStatus === ItineraryStatus.MISSING;
 
 const normalizeName = (value: string) => value.trim().toLowerCase();
+const NON_TRAVELING_GUARDIAN_VALUE = "__non_traveling_guardian__";
 
 interface TripMembersTableProps {
   tripId: string;
@@ -254,6 +255,17 @@ export const TripMembersTable = ({
         emergencyContactName: companion.emergencyContactName ?? "",
         emergencyContactPhone: companion.emergencyContactPhone ?? "",
         specialSituations: companion.specialSituations ?? "",
+        guardianFullName: companion.guardianFullName ?? "",
+        guardianIdTypeId: companion.guardianIdTypeId ?? "",
+        guardianIdNumber: companion.guardianIdNumber ?? "",
+        guardianPhone: companion.guardianPhone ?? "",
+        guardianEmail: companion.guardianEmail ?? "",
+        guardianRelationship: companion.guardianRelationship ?? "",
+        guardianAddress: companion.guardianAddress ?? "",
+        guardianProfession: companion.guardianProfession ?? "",
+        guardianMaritalStatus: companion.guardianMaritalStatus ?? "",
+        travelingAdultCompanionId: companion.travelingAdultCompanionId ?? "",
+        travelingAdultName: companion.travelingAdultName ?? "",
       })),
       packageLodgingType: member.packageLodgingType ?? tripLodgingType ?? "",
       packageBasePrice: member.packageBasePrice ?? tripPackageBasePrice ?? 0,
@@ -444,7 +456,8 @@ export const TripMembersTable = ({
         return companion;
       }
 
-      const guardianName = companion.emergencyContactName?.trim() || "";
+      const guardianName =
+        companion.guardianFullName?.trim() || companion.emergencyContactName?.trim() || "";
       if (!guardianName) {
         return companion;
       }
@@ -452,6 +465,11 @@ export const TripMembersTable = ({
       if (normalizeName(guardianName) === normalizeName(member.fullName)) {
         return {
           ...companion,
+          guardianFullName: member.fullName,
+          guardianIdTypeId: member.identificationTypeId,
+          guardianIdNumber: member.identification,
+          guardianPhone: member.phone,
+          guardianEmail: member.email,
           phone: member.phone,
           email: member.email,
           emergencyContactPhone: member.phone,
@@ -470,6 +488,11 @@ export const TripMembersTable = ({
 
       return {
         ...companion,
+        guardianFullName: adultCompanion.fullName,
+        guardianIdTypeId: adultCompanion.identificationTypeId,
+        guardianIdNumber: adultCompanion.identification,
+        guardianPhone: adultCompanion.phone,
+        guardianEmail: adultCompanion.email,
         phone: adultCompanion.phone,
         email: adultCompanion.email,
         emergencyContactPhone: adultCompanion.phone,
@@ -887,8 +910,70 @@ export const TripMembersTable = ({
     isFilled(person.emergencyContactPhone) &&
     isFilled(person.specialSituations);
 
-const requiresMinorPermit = (member: TripMember) =>
-  member.hasMinorCompanions && member.hasParentalAuthority === false;
+  const getAdultTravelGroupNames = (
+    member: TripMember,
+    companions: TripMember["companions"],
+  ) => {
+    const names = new Set<string>();
+    if (member.fullName.trim()) {
+      names.add(normalizeName(member.fullName));
+    }
+    companions
+      .filter((companion) => !companion.isMinor)
+      .forEach((companion) => {
+        if (companion.fullName.trim()) {
+          names.add(normalizeName(companion.fullName));
+        }
+      });
+    return names;
+  };
+
+  const isGuardianTravelingWithGroup = (
+    guardianName: string,
+    member: TripMember,
+    companions: TripMember["companions"],
+  ) => {
+    if (!guardianName.trim()) {
+      return false;
+    }
+    return getAdultTravelGroupNames(member, companions).has(normalizeName(guardianName));
+  };
+
+  const getNonTravelingGuardianNames = (member: TripMember) => {
+    const names = new Set<string>();
+    member.companions
+      .filter((companion) => companion.isMinor)
+      .forEach((companion) => {
+        const guardianName =
+          companion.guardianFullName?.trim() || companion.emergencyContactName?.trim() || "";
+        if (
+          guardianName &&
+          !isGuardianTravelingWithGroup(guardianName, member, member.companions)
+        ) {
+          names.add(guardianName);
+        }
+      });
+    return Array.from(names);
+  };
+
+  const getIdCardRequiredOwners = (member: TripMember) => {
+    const owners = [
+      "Titular",
+      ...member.companions
+        .map((companion) => companion.fullName.trim())
+        .filter((name) => name.length > 0),
+      ...getNonTravelingGuardianNames(member),
+    ];
+    return owners.filter((owner, index) => owners.indexOf(owner) === index);
+  };
+
+  const hasIdCardFrontAndBack = (member: TripMember, ownerName: string) =>
+    getDocsByType(member, "ID_CARD").filter(
+      (doc) => normalizeName(doc.ownerName) === normalizeName(ownerName),
+    ).length >= 2;
+
+  const requiresMinorPermit = (member: TripMember) =>
+    member.hasMinorCompanions && member.hasParentalAuthority === false;
 
   const getOwnerValue = (memberId: string, type: DocumentType) =>
     docOwners[memberId]?.[type] ?? "Titular";
@@ -1030,16 +1115,47 @@ const requiresMinorPermit = (member: TripMember) =>
         ok:
           member.hasCompanions !== true ||
           member.companions.every(
-            (companion) =>
-              isFilled(companion.fullName) &&
-              isFilled(companion.identificationTypeId) &&
-              isFilled(companion.identification) &&
-              isFilled(companion.email) &&
-              isFilled(companion.phone) &&
-              isFilled(companion.address) &&
-              isFilled(companion.maritalStatus) &&
-              isFilled(companion.nationalityId) &&
-              isFilled(companion.profession),
+            (companion) => {
+              const baseFieldsComplete =
+                isFilled(companion.fullName) &&
+                isFilled(companion.identificationTypeId) &&
+                isFilled(companion.identification) &&
+                isFilled(companion.email) &&
+                isFilled(companion.phone) &&
+                isFilled(companion.address) &&
+                isFilled(companion.maritalStatus) &&
+                isFilled(companion.nationalityId) &&
+                isFilled(companion.profession);
+
+              if (!baseFieldsComplete || !companion.isMinor) {
+                return baseFieldsComplete;
+              }
+
+              const guardianName =
+                companion.guardianFullName?.trim() || companion.emergencyContactName?.trim() || "";
+              const guardianIsNonTraveling =
+                guardianName.length > 0 &&
+                !isGuardianTravelingWithGroup(guardianName, member, member.companions);
+
+              const minorGuardianFieldsComplete =
+                isFilled(companion.travelingAdultName || "") &&
+                isFilled(guardianName) &&
+                isFilled(companion.guardianIdTypeId || "") &&
+                isFilled(companion.guardianIdNumber || "") &&
+                isFilled(companion.guardianRelationship || "") &&
+                isFilled(companion.guardianPhone || "");
+
+              if (!guardianIsNonTraveling) {
+                return minorGuardianFieldsComplete;
+              }
+
+              return (
+                minorGuardianFieldsComplete &&
+                isFilled(companion.guardianAddress || "") &&
+                isFilled(companion.guardianProfession || "") &&
+                isFilled(companion.guardianMaritalStatus || "")
+              );
+            },
           ),
       },
       {
@@ -1062,7 +1178,12 @@ const requiresMinorPermit = (member: TripMember) =>
       { label: "Plazo cuotas", ok: (member.paymentPlanMonths ?? 0) > 0 },
     ];
     const step5Required = [
-      { key: "idCard", label: "Documento: Cedula", enabled: true, type: "ID_CARD" as DocumentType },
+      {
+        key: "idCard",
+        label: "Documento: Cedula (frontal y posterior por persona)",
+        enabled: true,
+        type: "ID_CARD" as DocumentType,
+      },
       { key: "passport", label: "Documento: Pasaporte", enabled: true, type: "PASSPORT" as DocumentType },
       {
         key: "insurance",
@@ -1079,13 +1200,17 @@ const requiresMinorPermit = (member: TripMember) =>
         type: "PAYMENT_PROOF" as DocumentType,
       },
     ];
+    const requiredIdCardOwners = getIdCardRequiredOwners(member);
     const step5Checks = step5Required
       .filter((doc) => doc.enabled)
       .map((doc) => ({
         label: doc.label,
         ok:
-          member.docFlags[doc.key as keyof typeof member.docFlags] &&
-          getDocsByType(member, doc.type).length > 0,
+          doc.key === "idCard"
+            ? member.docFlags.idCard &&
+              requiredIdCardOwners.every((owner) => hasIdCardFrontAndBack(member, owner))
+            : member.docFlags[doc.key as keyof typeof member.docFlags] &&
+              getDocsByType(member, doc.type).length > 0,
       }));
 
     const step1 = buildProgress(step1Checks);
@@ -1832,6 +1957,17 @@ const requiresMinorPermit = (member: TripMember) =>
                                           emergencyContactName: "",
                                           emergencyContactPhone: "",
                                           specialSituations: "",
+                                          guardianFullName: "",
+                                          guardianIdTypeId: "",
+                                          guardianIdNumber: "",
+                                          guardianPhone: "",
+                                          guardianEmail: "",
+                                          guardianRelationship: "",
+                                          guardianAddress: "",
+                                          guardianProfession: "",
+                                          guardianMaritalStatus: "" as MaritalStatus | "",
+                                          travelingAdultCompanionId: "",
+                                          travelingAdultName: "",
                                         },
                                       ];
                                       updateCompanions(member, next);
@@ -1931,7 +2067,22 @@ const requiresMinorPermit = (member: TripMember) =>
                                               phone: candidate.phone,
                                               email: candidate.email,
                                             })),
+                                          {
+                                            value: NON_TRAVELING_GUARDIAN_VALUE,
+                                            label: "No viaja (padre/madre/tutor legal)",
+                                            phone: "",
+                                            email: "",
+                                          },
                                         ];
+                                        const guardianCurrentName =
+                                          companion.guardianFullName || companion.emergencyContactName || "";
+                                        const guardianExistsInTravelGroup = guardianOptions.some(
+                                          (option) =>
+                                            option.value !== NON_TRAVELING_GUARDIAN_VALUE &&
+                                            normalizeName(option.value) === normalizeName(guardianCurrentName),
+                                        );
+                                        const guardianIsNonTraveling =
+                                          guardianCurrentName.trim().length > 0 && !guardianExistsInTravelGroup;
 
                                         return (
                                           <div
@@ -1945,6 +2096,46 @@ const requiresMinorPermit = (member: TripMember) =>
                                               <div className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700">
                                                 {companion.fullName || `Acompanante ${idx + 1}`}
                                               </div>
+                                              <div className="space-y-1">
+                                                <div className="text-xs font-semibold text-slate-600">
+                                                  Adulto que acompana en viaje
+                                                </div>
+                                                <select
+                                                  className={selectClassName}
+                                                  value={companion.travelingAdultName || ""}
+                                                  disabled={step2Locked}
+                                                  onChange={(event) => {
+                                                    const selectedName = event.target.value;
+                                                    const selectedAdult = guardianOptions.find(
+                                                      (option) => option.value === selectedName,
+                                                    );
+                                                    const selectedAdultCompanion = member.companions.find(
+                                                      (candidate) =>
+                                                        !candidate.isMinor &&
+                                                        normalizeName(candidate.fullName || "") ===
+                                                          normalizeName(selectedName),
+                                                    );
+
+                                                    const next = [...member.companions];
+                                                    next[idx] = {
+                                                      ...companion,
+                                                      travelingAdultName: selectedName,
+                                                      travelingAdultCompanionId:
+                                                        selectedAdultCompanion?.id || "",
+                                                      phone: selectedAdult?.phone || companion.phone,
+                                                      email: selectedAdult?.email || companion.email,
+                                                    };
+                                                    updateCompanions(member, next);
+                                                  }}
+                                                >
+                                                  <option value="">Selecciona adulto</option>
+                                                  {guardianOptions.map((option) => (
+                                                    <option key={`${option.value}:adult`} value={option.value}>
+                                                      {option.label}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              </div>
                                             </div>
                                             <div className="space-y-1">
                                               <div className="text-xs font-semibold text-slate-600">
@@ -1952,17 +2143,89 @@ const requiresMinorPermit = (member: TripMember) =>
                                               </div>
                                               <select
                                                 className={selectClassName}
-                                                value={companion.emergencyContactName || ""}
+                                                value={
+                                                  guardianIsNonTraveling
+                                                    ? NON_TRAVELING_GUARDIAN_VALUE
+                                                    : guardianCurrentName
+                                                }
                                                 disabled={step2Locked}
                                                 onChange={(event) => {
                                                   const selectedName = event.target.value;
+                                                  if (selectedName === NON_TRAVELING_GUARDIAN_VALUE) {
+                                                    const next = [...member.companions];
+                                                    next[idx] = {
+                                                      ...companion,
+                                                      guardianFullName: guardianIsNonTraveling
+                                                        ? companion.guardianFullName
+                                                        : "",
+                                                      emergencyContactName: guardianIsNonTraveling
+                                                        ? companion.emergencyContactName
+                                                        : "",
+                                                      guardianIdTypeId: guardianIsNonTraveling
+                                                        ? companion.guardianIdTypeId
+                                                        : "",
+                                                      guardianIdNumber: guardianIsNonTraveling
+                                                        ? companion.guardianIdNumber
+                                                        : "",
+                                                      guardianPhone: guardianIsNonTraveling
+                                                        ? companion.guardianPhone
+                                                        : "",
+                                                      guardianEmail: guardianIsNonTraveling
+                                                        ? companion.guardianEmail
+                                                        : "",
+                                                      guardianRelationship: guardianIsNonTraveling
+                                                        ? companion.guardianRelationship
+                                                        : "",
+                                                      guardianAddress: guardianIsNonTraveling
+                                                        ? companion.guardianAddress
+                                                        : "",
+                                                      guardianProfession: guardianIsNonTraveling
+                                                        ? companion.guardianProfession
+                                                        : "",
+                                                      guardianMaritalStatus: guardianIsNonTraveling
+                                                        ? companion.guardianMaritalStatus
+                                                        : "",
+                                                      emergencyContactPhone: guardianIsNonTraveling
+                                                        ? companion.emergencyContactPhone
+                                                        : "",
+                                                    };
+                                                    updateCompanions(member, next);
+                                                    return;
+                                                  }
                                                   const selectedGuardian = guardianOptions.find(
                                                     (option) => option.value === selectedName,
                                                   );
                                                   const next = [...member.companions];
                                                   next[idx] = {
                                                     ...companion,
+                                                    guardianFullName: selectedName,
                                                     emergencyContactName: selectedName,
+                                                    guardianIdTypeId: selectedName
+                                                      ? (selectedName === member.fullName
+                                                        ? member.identificationTypeId
+                                                        : (member.companions.find(
+                                                            (candidate) =>
+                                                              !candidate.isMinor &&
+                                                              normalizeName(candidate.fullName || "") ===
+                                                                normalizeName(selectedName),
+                                                          )?.identificationTypeId || ""))
+                                                      : "",
+                                                    guardianIdNumber: selectedName
+                                                      ? (selectedName === member.fullName
+                                                        ? member.identification
+                                                        : (member.companions.find(
+                                                            (candidate) =>
+                                                              !candidate.isMinor &&
+                                                              normalizeName(candidate.fullName || "") ===
+                                                                normalizeName(selectedName),
+                                                          )?.identification || ""))
+                                                      : "",
+                                                    guardianPhone: selectedName
+                                                      ? (selectedGuardian?.phone || "")
+                                                      : "",
+                                                    guardianEmail: selectedName
+                                                      ? (selectedGuardian?.email || "")
+                                                      : "",
                                                     emergencyContactPhone: selectedName
                                                       ? (selectedGuardian?.phone || "")
                                                       : "",
@@ -1983,6 +2246,186 @@ const requiresMinorPermit = (member: TripMember) =>
                                                   </option>
                                                 ))}
                                               </select>
+
+                                              {guardianIsNonTraveling ? (
+                                                <div className="grid gap-2 md:grid-cols-2">
+                                                  <div className="space-y-1 md:col-span-2">
+                                                    <div className="text-xs font-semibold text-slate-600">
+                                                      Nombre tutor no viajero
+                                                    </div>
+                                                    <input
+                                                      type="text"
+                                                      className={inputClassName}
+                                                      value={companion.guardianFullName || ""}
+                                                      disabled={step2Locked}
+                                                      onChange={(event) => {
+                                                        const next = [...member.companions];
+                                                        next[idx] = {
+                                                          ...companion,
+                                                          guardianFullName: event.target.value,
+                                                          emergencyContactName: event.target.value,
+                                                        };
+                                                        updateCompanions(member, next);
+                                                      }}
+                                                    />
+                                                  </div>
+                                                  <div className="space-y-1">
+                                                    <div className="text-xs font-semibold text-slate-600">Tipo ID tutor</div>
+                                                    <select
+                                                      className={selectClassName}
+                                                      value={companion.guardianIdTypeId || ""}
+                                                      disabled={step2Locked}
+                                                      onChange={(event) => {
+                                                        const next = [...member.companions];
+                                                        next[idx] = {
+                                                          ...companion,
+                                                          guardianIdTypeId: event.target.value,
+                                                        };
+                                                        updateCompanions(member, next);
+                                                      }}
+                                                    >
+                                                      <option value="">Selecciona</option>
+                                                      {catalogOptions.identificationTypes.map((item) => (
+                                                        <option key={item.id} value={item.id}>
+                                                          {item.name}
+                                                        </option>
+                                                      ))}
+                                                    </select>
+                                                  </div>
+                                                  <div className="space-y-1">
+                                                    <div className="text-xs font-semibold text-slate-600">Estado civil tutor</div>
+                                                    <select
+                                                      className={selectClassName}
+                                                      value={companion.guardianMaritalStatus || ""}
+                                                      disabled={step2Locked}
+                                                      onChange={(event) => {
+                                                        const next = [...member.companions];
+                                                        next[idx] = {
+                                                          ...companion,
+                                                          guardianMaritalStatus: event.target.value as MaritalStatus | "",
+                                                        };
+                                                        updateCompanions(member, next);
+                                                      }}
+                                                    >
+                                                      <option value="">Selecciona</option>
+                                                      {maritalOptions.map((item) => (
+                                                        <option key={item.value} value={item.value}>
+                                                          {item.label}
+                                                        </option>
+                                                      ))}
+                                                    </select>
+                                                  </div>
+                                                  <div className="space-y-1 md:col-span-2">
+                                                    <div className="text-xs font-semibold text-slate-600">Direccion tutor</div>
+                                                    <input
+                                                      type="text"
+                                                      className={inputClassName}
+                                                      value={companion.guardianAddress || ""}
+                                                      disabled={step2Locked}
+                                                      onChange={(event) => {
+                                                        const next = [...member.companions];
+                                                        next[idx] = {
+                                                          ...companion,
+                                                          guardianAddress: event.target.value,
+                                                        };
+                                                        updateCompanions(member, next);
+                                                      }}
+                                                    />
+                                                  </div>
+                                                  <div className="space-y-1 md:col-span-2">
+                                                    <div className="text-xs font-semibold text-slate-600">Profesion u ocupacion tutor</div>
+                                                    <input
+                                                      type="text"
+                                                      className={inputClassName}
+                                                      value={companion.guardianProfession || ""}
+                                                      disabled={step2Locked}
+                                                      onChange={(event) => {
+                                                        const next = [...member.companions];
+                                                        next[idx] = {
+                                                          ...companion,
+                                                          guardianProfession: event.target.value,
+                                                        };
+                                                        updateCompanions(member, next);
+                                                      }}
+                                                    />
+                                                  </div>
+                                                </div>
+                                              ) : null}
+
+                                              <div className="grid gap-2 md:grid-cols-2">
+                                                <div className="space-y-1">
+                                                  <div className="text-xs font-semibold text-slate-600">ID tutor</div>
+                                                  <input
+                                                    type="text"
+                                                    className={inputClassName}
+                                                    value={companion.guardianIdNumber || ""}
+                                                    disabled={step2Locked}
+                                                    onChange={(event) => {
+                                                      const next = [...member.companions];
+                                                      next[idx] = {
+                                                        ...companion,
+                                                        guardianIdNumber: event.target.value,
+                                                      };
+                                                      updateCompanions(member, next);
+                                                    }}
+                                                  />
+                                                </div>
+                                                <div className="space-y-1">
+                                                  <div className="text-xs font-semibold text-slate-600">Relacion</div>
+                                                  <input
+                                                    type="text"
+                                                    className={inputClassName}
+                                                    value={companion.guardianRelationship || ""}
+                                                    placeholder="Padre, madre, tutor legal"
+                                                    disabled={step2Locked}
+                                                    onChange={(event) => {
+                                                      const next = [...member.companions];
+                                                      next[idx] = {
+                                                        ...companion,
+                                                        guardianRelationship: event.target.value,
+                                                      };
+                                                      updateCompanions(member, next);
+                                                    }}
+                                                  />
+                                                </div>
+                                              </div>
+                                              <div className="grid gap-2 md:grid-cols-2">
+                                                <div className="space-y-1">
+                                                  <div className="text-xs font-semibold text-slate-600">Telefono tutor</div>
+                                                  <input
+                                                    type="text"
+                                                    className={inputClassName}
+                                                    value={companion.guardianPhone || ""}
+                                                    disabled={step2Locked}
+                                                    onChange={(event) => {
+                                                      const next = [...member.companions];
+                                                      next[idx] = {
+                                                        ...companion,
+                                                        guardianPhone: event.target.value,
+                                                        emergencyContactPhone: event.target.value,
+                                                      };
+                                                      updateCompanions(member, next);
+                                                    }}
+                                                  />
+                                                </div>
+                                                <div className="space-y-1">
+                                                  <div className="text-xs font-semibold text-slate-600">Correo tutor</div>
+                                                  <input
+                                                    type="email"
+                                                    className={inputClassName}
+                                                    value={companion.guardianEmail || ""}
+                                                    disabled={step2Locked}
+                                                    onChange={(event) => {
+                                                      const next = [...member.companions];
+                                                      next[idx] = {
+                                                        ...companion,
+                                                        guardianEmail: event.target.value,
+                                                      };
+                                                      updateCompanions(member, next);
+                                                    }}
+                                                  />
+                                                </div>
+                                              </div>
                                             </div>
                                           </div>
                                         );
@@ -2679,7 +3122,12 @@ const requiresMinorPermit = (member: TripMember) =>
                             <div className="flex flex-wrap gap-4 text-xs text-slate-600">
                               {(
                                 [
-                                  { key: "idCard", label: "Cedula", type: "ID_CARD" as DocumentType, enabled: true },
+                                  {
+                                    key: "idCard",
+                                    label: "Cedula (frontal y posterior)",
+                                    type: "ID_CARD" as DocumentType,
+                                    enabled: true,
+                                  },
                                   { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType, enabled: true },
                                   {
                                     key: "insurance",
@@ -2738,7 +3186,11 @@ const requiresMinorPermit = (member: TripMember) =>
 
                             {(
                               [
-                                { key: "idCard", label: "Cedula", type: "ID_CARD" as DocumentType },
+                                {
+                                  key: "idCard",
+                                  label: "Cedula (frontal y posterior)",
+                                  type: "ID_CARD" as DocumentType,
+                                },
                                 { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType },
                                 { key: "insurance", label: "Seguro propio", type: "INSURANCE" as DocumentType },
                                 { key: "paymentProof", label: "Pagos", type: "PAYMENT_PROOF" as DocumentType },
@@ -2748,16 +3200,24 @@ const requiresMinorPermit = (member: TripMember) =>
                               if (!enabled) {
                                 return null;
                               }
-                              const ownerOptions = [
-                                "Titular",
-                                ...member.companions
-                                  .map((companion) => companion.fullName)
-                                  .filter((name) => name.trim().length > 0),
-                              ];
+                              const ownerOptions =
+                                item.key === "idCard"
+                                  ? getIdCardRequiredOwners(member)
+                                  : [
+                                      "Titular",
+                                      ...member.companions
+                                        .map((companion) => companion.fullName)
+                                        .filter((name) => name.trim().length > 0),
+                                    ];
                               const docs = getDocsByType(member, item.type);
                               return (
                                 <div key={item.key} className="rounded-md border border-slate-200 bg-slate-50 p-3">
                                   <div className="text-xs font-semibold text-slate-700">{item.label}</div>
+                                  {item.key === "idCard" ? (
+                                    <div className="mt-1 text-[11px] text-slate-500">
+                                      Requerido: cargar frente y reverso por cada persona en lista (titular, acompanantes y tutor no viajero cuando aplique).
+                                    </div>
+                                  ) : null}
                                   <div className="mt-2 grid gap-2 md:grid-cols-3">
                                     <div className="space-y-1">
                                       <div className="text-[11px] text-slate-500">Pertenece a</div>
@@ -2811,6 +3271,11 @@ const requiresMinorPermit = (member: TripMember) =>
                                     ) : null}
                                     <div className="space-y-1 md:col-span-2">
                                       <div className="text-[11px] text-slate-500">Adjuntar documentos</div>
+                                      {item.key === "idCard" ? (
+                                        <div className="text-[11px] font-semibold text-amber-700">
+                                          Subir cédula frontal y posterior (2 archivos por persona).
+                                        </div>
+                                      ) : null}
                                       <input
                                         className={inputClassName}
                                         type="file"
@@ -4205,6 +4670,17 @@ const requiresMinorPermit = (member: TripMember) =>
                       emergencyContactName: "",
                       emergencyContactPhone: "",
                       specialSituations: "",
+                      guardianFullName: "",
+                      guardianIdTypeId: "",
+                      guardianIdNumber: "",
+                      guardianPhone: "",
+                      guardianEmail: "",
+                      guardianRelationship: "",
+                      guardianAddress: "",
+                      guardianProfession: "",
+                      guardianMaritalStatus: "" as MaritalStatus | "",
+                      travelingAdultCompanionId: "",
+                      travelingAdultName: "",
                     },
                   ];
                   updateCompanionsDraft(next);
@@ -4274,6 +4750,343 @@ const requiresMinorPermit = (member: TripMember) =>
                   ))}
                 </div>
               ) : null}
+
+              {draft.companions.some((companion) => companion.isMinor) ? (
+                <div className="space-y-2 rounded-md border border-slate-200 bg-white p-2">
+                  <p className="text-xs font-semibold text-slate-700">Tutor legal por menor</p>
+                  {draft.companions
+                    .map((companion, idx) => ({ companion, idx }))
+                    .filter(({ companion }) => companion.isMinor)
+                    .map(({ companion, idx }) => {
+                      const guardianOptions = [
+                        {
+                          value: draft.fullName,
+                          label: `Titular: ${draft.fullName}`,
+                          phone: draft.phone,
+                          email: draft.email,
+                        },
+                        ...draft.companions
+                          .filter((candidate) => !candidate.isMinor)
+                          .map((candidate, candidateIdx) => ({
+                            value: candidate.fullName || `Acompanante ${candidateIdx + 1}`,
+                            label: `Acompanante adulto: ${candidate.fullName || `Acompanante ${candidateIdx + 1}`}`,
+                            phone: candidate.phone,
+                            email: candidate.email,
+                          })),
+                        {
+                          value: NON_TRAVELING_GUARDIAN_VALUE,
+                          label: "No viaja (padre/madre/tutor legal)",
+                          phone: "",
+                          email: "",
+                        },
+                      ];
+                      const guardianCurrentName =
+                        companion.guardianFullName || companion.emergencyContactName || "";
+                      const guardianExistsInTravelGroup = guardianOptions.some(
+                        (option) =>
+                          option.value !== NON_TRAVELING_GUARDIAN_VALUE &&
+                          normalizeName(option.value) === normalizeName(guardianCurrentName),
+                      );
+                      const guardianIsNonTraveling =
+                        guardianCurrentName.trim().length > 0 && !guardianExistsInTravelGroup;
+
+                      return (
+                        <div
+                          key={`${companion.id}:guardian-draft`}
+                          className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 md:grid-cols-2"
+                        >
+                          <div className="space-y-1">
+                            <div className="text-xs font-semibold text-slate-600">Menor</div>
+                            <div className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700">
+                              {companion.fullName || `Acompanante ${idx + 1}`}
+                            </div>
+                            <div className="space-y-1">
+                              <div className="text-xs font-semibold text-slate-600">Adulto que acompana en viaje</div>
+                              <select
+                                className={selectClassName}
+                                value={companion.travelingAdultName || ""}
+                                onChange={(event) => {
+                                  const selectedName = event.target.value;
+                                  const selectedAdult = draft.companions.find(
+                                    (candidate) =>
+                                      !candidate.isMinor &&
+                                      normalizeName(candidate.fullName || "") === normalizeName(selectedName),
+                                  );
+                                  const next = [...draft.companions];
+                                  next[idx] = {
+                                    ...companion,
+                                    travelingAdultName: selectedName,
+                                    travelingAdultCompanionId: selectedAdult?.id || "",
+                                    phone: selectedAdult?.phone || companion.phone,
+                                    email: selectedAdult?.email || companion.email,
+                                  };
+                                  updateCompanionsDraft(next);
+                                }}
+                              >
+                                <option value="">Selecciona adulto</option>
+                                {guardianOptions.map((option) => (
+                                  <option key={`${option.value}:adult-draft`} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <div className="text-xs font-semibold text-slate-600">Tutor legal (titular o adulto)</div>
+                            <select
+                              className={selectClassName}
+                              value={
+                                guardianIsNonTraveling
+                                  ? NON_TRAVELING_GUARDIAN_VALUE
+                                  : guardianCurrentName
+                              }
+                              onChange={(event) => {
+                                const selectedName = event.target.value;
+                                if (selectedName === NON_TRAVELING_GUARDIAN_VALUE) {
+                                  const next = [...draft.companions];
+                                  next[idx] = {
+                                    ...companion,
+                                    guardianFullName: guardianIsNonTraveling
+                                      ? companion.guardianFullName
+                                      : "",
+                                    emergencyContactName: guardianIsNonTraveling
+                                      ? companion.emergencyContactName
+                                      : "",
+                                    guardianIdTypeId: guardianIsNonTraveling
+                                      ? companion.guardianIdTypeId
+                                      : "",
+                                    guardianIdNumber: guardianIsNonTraveling
+                                      ? companion.guardianIdNumber
+                                      : "",
+                                    guardianPhone: guardianIsNonTraveling
+                                      ? companion.guardianPhone
+                                      : "",
+                                    guardianEmail: guardianIsNonTraveling
+                                      ? companion.guardianEmail
+                                      : "",
+                                    guardianRelationship: guardianIsNonTraveling
+                                      ? companion.guardianRelationship
+                                      : "",
+                                    guardianAddress: guardianIsNonTraveling
+                                      ? companion.guardianAddress
+                                      : "",
+                                    guardianProfession: guardianIsNonTraveling
+                                      ? companion.guardianProfession
+                                      : "",
+                                    guardianMaritalStatus: guardianIsNonTraveling
+                                      ? companion.guardianMaritalStatus
+                                      : "",
+                                    emergencyContactPhone: guardianIsNonTraveling
+                                      ? companion.emergencyContactPhone
+                                      : "",
+                                  };
+                                  updateCompanionsDraft(next);
+                                  return;
+                                }
+                                const selectedGuardian = guardianOptions.find(
+                                  (option) => option.value === selectedName,
+                                );
+                                const selectedCompanion = draft.companions.find(
+                                  (candidate) =>
+                                    !candidate.isMinor &&
+                                    normalizeName(candidate.fullName || "") === normalizeName(selectedName),
+                                );
+                                const next = [...draft.companions];
+                                next[idx] = {
+                                  ...companion,
+                                  guardianFullName: selectedName,
+                                  emergencyContactName: selectedName,
+                                  guardianIdTypeId: selectedName
+                                    ? (selectedName === draft.fullName
+                                      ? draft.identificationTypeId
+                                      : selectedCompanion?.identificationTypeId || "")
+                                    : "",
+                                  guardianIdNumber: selectedName
+                                    ? (selectedName === draft.fullName
+                                      ? draft.identification
+                                      : selectedCompanion?.identification || "")
+                                    : "",
+                                  guardianPhone: selectedName ? (selectedGuardian?.phone || "") : "",
+                                  guardianEmail: selectedName ? (selectedGuardian?.email || "") : "",
+                                  emergencyContactPhone: selectedName ? (selectedGuardian?.phone || "") : "",
+                                };
+                                updateCompanionsDraft(next);
+                              }}
+                            >
+                              <option value="">Selecciona tutor</option>
+                              {guardianOptions.map((option) => (
+                                <option key={`${option.value}:guardian-draft`} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                            {guardianIsNonTraveling ? (
+                              <div className="grid gap-2 md:grid-cols-2">
+                                <div className="space-y-1 md:col-span-2">
+                                  <div className="text-xs font-semibold text-slate-600">
+                                    Nombre tutor no viajero
+                                  </div>
+                                  <input
+                                    type="text"
+                                    className={inputClassName}
+                                    value={companion.guardianFullName || ""}
+                                    onChange={(event) => {
+                                      const next = [...draft.companions];
+                                      next[idx] = {
+                                        ...companion,
+                                        guardianFullName: event.target.value,
+                                        emergencyContactName: event.target.value,
+                                      };
+                                      updateCompanionsDraft(next);
+                                    }}
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <div className="text-xs font-semibold text-slate-600">Tipo ID tutor</div>
+                                  <select
+                                    className={selectClassName}
+                                    value={companion.guardianIdTypeId || ""}
+                                    onChange={(event) => {
+                                      const next = [...draft.companions];
+                                      next[idx] = {
+                                        ...companion,
+                                        guardianIdTypeId: event.target.value,
+                                      };
+                                      updateCompanionsDraft(next);
+                                    }}
+                                  >
+                                    <option value="">Selecciona</option>
+                                    {catalogOptions.identificationTypes.map((item) => (
+                                      <option key={item.id} value={item.id}>
+                                        {item.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div className="space-y-1">
+                                  <div className="text-xs font-semibold text-slate-600">Estado civil tutor</div>
+                                  <select
+                                    className={selectClassName}
+                                    value={companion.guardianMaritalStatus || ""}
+                                    onChange={(event) => {
+                                      const next = [...draft.companions];
+                                      next[idx] = {
+                                        ...companion,
+                                        guardianMaritalStatus: event.target.value as MaritalStatus | "",
+                                      };
+                                      updateCompanionsDraft(next);
+                                    }}
+                                  >
+                                    <option value="">Selecciona</option>
+                                    {maritalOptions.map((item) => (
+                                      <option key={item.value} value={item.value}>
+                                        {item.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div className="space-y-1 md:col-span-2">
+                                  <div className="text-xs font-semibold text-slate-600">Direccion tutor</div>
+                                  <input
+                                    type="text"
+                                    className={inputClassName}
+                                    value={companion.guardianAddress || ""}
+                                    onChange={(event) => {
+                                      const next = [...draft.companions];
+                                      next[idx] = {
+                                        ...companion,
+                                        guardianAddress: event.target.value,
+                                      };
+                                      updateCompanionsDraft(next);
+                                    }}
+                                  />
+                                </div>
+                                <div className="space-y-1 md:col-span-2">
+                                  <div className="text-xs font-semibold text-slate-600">Profesion u ocupacion tutor</div>
+                                  <input
+                                    type="text"
+                                    className={inputClassName}
+                                    value={companion.guardianProfession || ""}
+                                    onChange={(event) => {
+                                      const next = [...draft.companions];
+                                      next[idx] = {
+                                        ...companion,
+                                        guardianProfession: event.target.value,
+                                      };
+                                      updateCompanionsDraft(next);
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            ) : null}
+                            <div className="grid gap-2 md:grid-cols-2">
+                              <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-600">ID tutor</div>
+                                <input
+                                  type="text"
+                                  className={inputClassName}
+                                  value={companion.guardianIdNumber || ""}
+                                  onChange={(event) => {
+                                    const next = [...draft.companions];
+                                    next[idx] = { ...companion, guardianIdNumber: event.target.value };
+                                    updateCompanionsDraft(next);
+                                  }}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-600">Relacion</div>
+                                <input
+                                  type="text"
+                                  className={inputClassName}
+                                  value={companion.guardianRelationship || ""}
+                                  placeholder="Padre, madre, tutor legal"
+                                  onChange={(event) => {
+                                    const next = [...draft.companions];
+                                    next[idx] = { ...companion, guardianRelationship: event.target.value };
+                                    updateCompanionsDraft(next);
+                                  }}
+                                />
+                              </div>
+                            </div>
+                            <div className="grid gap-2 md:grid-cols-2">
+                              <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-600">Telefono tutor</div>
+                                <input
+                                  type="text"
+                                  className={inputClassName}
+                                  value={companion.guardianPhone || ""}
+                                  onChange={(event) => {
+                                    const next = [...draft.companions];
+                                    next[idx] = {
+                                      ...companion,
+                                      guardianPhone: event.target.value,
+                                      emergencyContactPhone: event.target.value,
+                                    };
+                                    updateCompanionsDraft(next);
+                                  }}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-600">Correo tutor</div>
+                                <input
+                                  type="email"
+                                  className={inputClassName}
+                                  value={companion.guardianEmail || ""}
+                                  onChange={(event) => {
+                                    const next = [...draft.companions];
+                                    next[idx] = { ...companion, guardianEmail: event.target.value };
+                                    updateCompanionsDraft(next);
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -4331,7 +5144,12 @@ const requiresMinorPermit = (member: TripMember) =>
         <div className="flex flex-wrap gap-4 text-xs text-slate-600">
           {(
             [
-              { key: "idCard", label: "Cedula", type: "ID_CARD" as DocumentType, enabled: true },
+              {
+                key: "idCard",
+                label: "Cedula (frontal y posterior)",
+                type: "ID_CARD" as DocumentType,
+                enabled: true,
+              },
               { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType, enabled: true },
               {
                 key: "paymentProof",
@@ -4386,7 +5204,11 @@ const requiresMinorPermit = (member: TripMember) =>
 
         {(
           [
-            { key: "idCard", label: "Cedula", type: "ID_CARD" as DocumentType },
+            {
+              key: "idCard",
+              label: "Cedula (frontal y posterior)",
+              type: "ID_CARD" as DocumentType,
+            },
             { key: "passport", label: "Pasaporte", type: "PASSPORT" as DocumentType },
             { key: "paymentProof", label: "Pagos", type: "PAYMENT_PROOF" as DocumentType },
             { key: "insurance", label: "Seguro propio", type: "INSURANCE" as DocumentType },
@@ -4396,16 +5218,24 @@ const requiresMinorPermit = (member: TripMember) =>
           if (!enabled) {
             return null;
           }
-          const ownerOptions = [
-            "Titular",
-            ...draft.companions
-              .map((companion) => companion.fullName)
-              .filter((name) => name.trim().length > 0),
-          ];
+          const ownerOptions =
+            item.key === "idCard"
+              ? getIdCardRequiredOwners(draft)
+              : [
+                  "Titular",
+                  ...draft.companions
+                    .map((companion) => companion.fullName)
+                    .filter((name) => name.trim().length > 0),
+                ];
           const docs = getDocsByType(draft, item.type);
           return (
             <div key={item.key} className="rounded-md border border-slate-200 bg-slate-50 p-3">
               <div className="text-xs font-semibold text-slate-700">{item.label}</div>
+              {item.key === "idCard" ? (
+                <div className="mt-1 text-[11px] text-slate-500">
+                  Requerido: cargar frente y reverso por cada persona en lista (titular, acompanantes y tutor no viajero cuando aplique).
+                </div>
+              ) : null}
               <div className="mt-2 grid gap-2 md:grid-cols-3">
                 <div className="space-y-1">
                   <div className="text-[11px] text-slate-500">Pertenece a</div>
@@ -4454,6 +5284,11 @@ const requiresMinorPermit = (member: TripMember) =>
                 ) : null}
                 <div className="space-y-1 md:col-span-2">
                   <div className="text-[11px] text-slate-500">Adjuntar documentos</div>
+                  {item.key === "idCard" ? (
+                    <div className="text-[11px] font-semibold text-amber-700">
+                      Subir cédula frontal y posterior (2 archivos por persona).
+                    </div>
+                  ) : null}
                   <input
                     className={inputClassName}
                     type="file"

@@ -5,14 +5,6 @@ import {
   renderContractGeneralPreviewHtml,
 } from "@/lib/contracts/renderContractTemplate";
 import {
-  renderInsuranceAnnexPreview,
-  renderInsuranceAnnexPreviewHtml,
-} from "@/lib/contracts/renderInsuranceAnnexTemplate";
-import {
-  renderInsuranceExonerationPreview,
-  renderInsuranceExonerationPreviewHtml,
-} from "@/lib/contracts/renderInsuranceExonerationTemplate";
-import {
   renderMinorPermitAnnexPreview,
   renderMinorPermitAnnexPreviewHtml,
 } from "@/lib/contracts/renderMinorPermitAnnexTemplate";
@@ -31,9 +23,6 @@ interface BundleTraveler {
   idNumber: string;
   emergencyName: string;
   emergencyPhone: string;
-  wantsInsurance: boolean | null;
-  insuranceId: string;
-  hasOwnInsurance: boolean | null;
   isMinor?: boolean;
   guardianName?: string;
   guardianIdType?: string;
@@ -42,7 +31,7 @@ interface BundleTraveler {
 }
 
 export interface ContractDocumentFile {
-  kind: "contract" | "insurance-annex" | "insurance-exoneration" | "minor-annex";
+  kind: "contract" | "minor-annex";
   title: string;
   fileNameBase: string;
   plainText: string;
@@ -61,7 +50,6 @@ export interface BuildContractDocumentBundleInput {
   includeEdwin?: boolean;
   includeErick?: boolean;
   issuedAtIso?: string;
-  resolveInsuranceName?: (insuranceId: string) => string;
 }
 
 const sanitizeName = (value: string): string =>
@@ -100,9 +88,6 @@ export const buildContractDocumentBundle = (
   const contractNumber = buildContractNumber(input.member);
   const includeEdwin = input.includeEdwin ?? true;
   const includeErick = input.includeErick ?? false;
-  const insuranceNameResolver =
-    input.resolveInsuranceName ??
-    ((insuranceId: string) => (insuranceId ? insuranceId : "PENDIENTE"));
 
   const { payload: contractPayload, missingFields } = mapTripMemberToContractDraft(
     input.member,
@@ -146,9 +131,6 @@ export const buildContractDocumentBundle = (
       idNumber: input.member.identification,
       emergencyName: input.member.emergencyContactName,
       emergencyPhone: input.member.emergencyContactPhone,
-      wantsInsurance: input.member.wantsInsurance,
-      insuranceId: input.member.insuranceId,
-      hasOwnInsurance: input.member.hasOwnInsurance,
     },
     ...input.member.companions.map((companion) => ({
       name: companion.fullName,
@@ -157,9 +139,6 @@ export const buildContractDocumentBundle = (
       idNumber: companion.identification,
       emergencyName: companion.emergencyContactName,
       emergencyPhone: companion.emergencyContactPhone,
-      wantsInsurance: companion.wantsInsurance,
-      insuranceId: companion.insuranceId,
-      hasOwnInsurance: companion.hasOwnInsurance,
       isMinor: companion.isMinor,
       guardianName: input.member.fullName,
       guardianIdType: resolveIdTypeLabel(input.member.identificationTypeId),
@@ -167,100 +146,6 @@ export const buildContractDocumentBundle = (
       guardianPhone: input.member.phone,
     })),
   ];
-
-  const insuranceAnnexNumber = `${contractNumber}-AS`;
-  const insurancePayload = {
-    contractNumber,
-    annexNumber: insuranceAnnexNumber,
-    clientFullName: input.member.fullName,
-    clientIdType: resolveIdTypeLabel(input.member.identificationTypeId),
-    clientIdNumber: input.member.identification,
-    tripDestination: input.member.packageName || input.trip.name || "-",
-    tripStartDate: input.trip.dateFrom,
-    tripEndDate: input.trip.dateTo,
-    annexIssuedAt: issuedAt,
-    annexSentAt: issuedAt,
-    annexCutoffAt: "48 horas antes del viaje",
-    includeEdwin,
-    includeErick,
-    lucitoursEdwinDate: includeEdwin ? issuedAt : "",
-    lucitoursErickDate: includeErick ? issuedAt : "",
-    clientDate: issuedAt,
-    travelers: allTravelers.map((traveler) => ({
-      travelerName: traveler.name,
-      travelerRole: traveler.role,
-      travelerIdType: traveler.idType,
-      travelerIdNumber: traveler.idNumber,
-      emergencyContactName: traveler.emergencyName || input.member.emergencyContactName,
-      emergencyContactPhone: traveler.emergencyPhone || input.member.emergencyContactPhone,
-      wantsInsuranceWithLucitours: traveler.wantsInsurance,
-      provider:
-        traveler.wantsInsurance === true
-          ? insuranceNameResolver(traveler.insuranceId)
-          : "NO APLICA",
-      hasOwnInsurance: traveler.hasOwnInsurance,
-    })),
-  };
-
-  files.push({
-    kind: "insurance-annex",
-    title: "Anexo de declaracion de seguro",
-    fileNameBase: `${sanitizeName(contractNumber)}-anexo-seguro`,
-    plainText: renderInsuranceAnnexPreview(insurancePayload),
-    html: renderInsuranceAnnexPreviewHtml(insurancePayload),
-  });
-
-  const travelersWithoutLucitoursInsurance = allTravelers.filter(
-    (traveler) => traveler.wantsInsurance === false,
-  );
-
-  travelersWithoutLucitoursInsurance.forEach((traveler, index) => {
-    files.push({
-      kind: "insurance-exoneration",
-      title: `Anexo de exoneracion por seguro - ${traveler.name}`,
-      fileNameBase: `${sanitizeName(contractNumber)}-anexo-exoneracion-${index + 1}-${sanitizeName(traveler.name)}`,
-      plainText: renderInsuranceExonerationPreview({
-        contractNumber,
-        annexNumber: `${contractNumber}-EX-${index + 1}`,
-        tripDestination: input.member.packageName || input.trip.name || "-",
-        tripStartDate: input.trip.dateFrom,
-        tripEndDate: input.trip.dateTo,
-        clientFullName: input.member.fullName,
-        travelerName: traveler.name,
-        travelerRole: traveler.role,
-        travelerIdType: traveler.idType,
-        travelerIdNumber: traveler.idNumber,
-        emergencyContactName: traveler.emergencyName || input.member.emergencyContactName,
-        emergencyContactPhone: traveler.emergencyPhone || input.member.emergencyContactPhone,
-        hasOwnInsurance: traveler.hasOwnInsurance,
-        includeEdwin,
-        includeErick,
-        lucitoursEdwinDate: includeEdwin ? issuedAt : "",
-        lucitoursErickDate: includeErick ? issuedAt : "",
-        issuedAt,
-      }),
-      html: renderInsuranceExonerationPreviewHtml({
-        contractNumber,
-        annexNumber: `${contractNumber}-EX-${index + 1}`,
-        tripDestination: input.member.packageName || input.trip.name || "-",
-        tripStartDate: input.trip.dateFrom,
-        tripEndDate: input.trip.dateTo,
-        clientFullName: input.member.fullName,
-        travelerName: traveler.name,
-        travelerRole: traveler.role,
-        travelerIdType: traveler.idType,
-        travelerIdNumber: traveler.idNumber,
-        emergencyContactName: traveler.emergencyName || input.member.emergencyContactName,
-        emergencyContactPhone: traveler.emergencyPhone || input.member.emergencyContactPhone,
-        hasOwnInsurance: traveler.hasOwnInsurance,
-        includeEdwin,
-        includeErick,
-        lucitoursEdwinDate: includeEdwin ? issuedAt : "",
-        lucitoursErickDate: includeErick ? issuedAt : "",
-        issuedAt,
-      }),
-    });
-  });
 
   const minorCompanions = allTravelers.filter(
     (traveler) => "isMinor" in traveler && traveler.isMinor,
@@ -285,6 +170,10 @@ export const buildContractDocumentBundle = (
         guardianIdType: traveler.guardianIdType || resolveIdTypeLabel(input.member.identificationTypeId),
         guardianIdNumber: traveler.guardianIdNumber || input.member.identification,
         guardianPhone: traveler.guardianPhone || input.member.phone,
+        travelingAdultName: input.member.fullName,
+        travelingAdultIdType: resolveIdTypeLabel(input.member.identificationTypeId),
+        travelingAdultIdNumber: input.member.identification,
+        travelingAdultPhone: input.member.phone,
         issuedAt,
       }),
       html: renderMinorPermitAnnexPreviewHtml({
@@ -301,6 +190,10 @@ export const buildContractDocumentBundle = (
         guardianIdType: traveler.guardianIdType || resolveIdTypeLabel(input.member.identificationTypeId),
         guardianIdNumber: traveler.guardianIdNumber || input.member.identification,
         guardianPhone: traveler.guardianPhone || input.member.phone,
+        travelingAdultName: input.member.fullName,
+        travelingAdultIdType: resolveIdTypeLabel(input.member.identificationTypeId),
+        travelingAdultIdNumber: input.member.identification,
+        travelingAdultPhone: input.member.phone,
         issuedAt,
       }),
     });

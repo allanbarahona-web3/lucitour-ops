@@ -14,6 +14,10 @@ export interface MinorPermitAnnexPayload {
   guardianIdType: string;
   guardianIdNumber: string;
   guardianPhone: string;
+  travelingAdultName: string;
+  travelingAdultIdType: string;
+  travelingAdultIdNumber: string;
+  travelingAdultPhone: string;
   issuedAt: string;
 }
 
@@ -40,25 +44,39 @@ export const renderMinorPermitAnnexPreview = (
   lines.push(`- Identificacion: ${payload.guardianIdType || "-"} ${payload.guardianIdNumber || "-"}`);
   lines.push(`- Telefono de contacto: ${payload.guardianPhone || "-"}`);
   lines.push("");
-  lines.push("TERCERO: DECLARACION DE AUTORIZACION");
+  lines.push("TERCERO: ADULTO RESPONSABLE QUE ACOMPANA AL MENOR DURANTE EL VIAJE");
+  lines.push(`- Nombre completo: ${payload.travelingAdultName || "-"}`);
+  lines.push(
+    `- Identificacion: ${payload.travelingAdultIdType || "-"} ${payload.travelingAdultIdNumber || "-"}`,
+  );
+  lines.push(`- Telefono de contacto: ${payload.travelingAdultPhone || "-"}`);
+  lines.push("");
+  lines.push("CUARTO: DECLARACION DE AUTORIZACION");
   lines.push(
     "La persona firmante declara, bajo fe de juramento, que cuenta con facultades legales suficientes para autorizar el viaje del menor y exonera a Lucitours de responsabilidad por informacion inexacta o documentacion insuficiente aportada por el representante.",
   );
   lines.push("");
-  lines.push("CUARTO: DOCUMENTO DE RESPALDO");
+  lines.push("QUINTO: DOCUMENTO DE RESPALDO");
   lines.push(
     "Este anexo debe estar acompanado por el permiso notarial, judicial o documento equivalente exigido por la normativa migratoria aplicable.",
   );
   lines.push("");
   lines.push("FIRMAS");
-  lines.push("Representante del menor (tutor / patria potestad):");
+  lines.push("1) Representante del menor (tutor / patria potestad):");
   lines.push("______________________________");
   lines.push(`${payload.guardianName || "-"}`);
   lines.push(`Identificacion: ${payload.guardianIdType || "-"} ${payload.guardianIdNumber || "-"}`);
   lines.push("");
-  lines.push("Lucitours:");
+  lines.push("2) Adulto que acompana al menor en el viaje:");
   lines.push("______________________________");
-  lines.push("Representante legal");
+  lines.push(`${payload.travelingAdultName || "-"}`);
+  lines.push(
+    `Identificacion: ${payload.travelingAdultIdType || "-"} ${payload.travelingAdultIdNumber || "-"}`,
+  );
+  lines.push("");
+  lines.push("3) Menor de edad identificado en este documento:");
+  lines.push(`${payload.minorFullName || "-"}`);
+  lines.push(`Identificacion: ${payload.minorIdType || "-"} ${payload.minorIdNumber || "-"}`);
   lines.push("");
   lines.push(`Fecha de emision: ${payload.issuedAt || "-"}`);
 

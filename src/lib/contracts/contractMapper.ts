@@ -57,25 +57,15 @@ export interface ContractPayload {
     installmentsSummary: string;
     dueDate: string;
     paidAt: string;
+    exchangeRateText: string;
   };
   lodging: {
     checkInDateFrom: string;
     checkInDateTo: string;
     checkOutDate: string;
   };
-  legal: {
-    applyExonerationAnnex: boolean;
-  };
   sale: {
     isResale: boolean;
-  };
-  annexes: {
-    insuranceAndCoverage: {
-      enabled: boolean;
-      version: string;
-      signedAt: string;
-      cutoffHours: number;
-    };
   };
   lucitours: {
     signatories: {
@@ -99,6 +89,7 @@ export interface ContractDraftOverrides {
   itineraryItems?: Array<{ date: string; activity: string }>;
   requireManualItinerary?: boolean;
   allowedLuggageText?: string;
+  exchangeRate?: number;
   lucitoursSignatories?: {
     includeEdwin: boolean;
     includeErick: boolean;
@@ -278,25 +269,15 @@ export const mapTripMemberToContractDraft = (
       installmentsSummary,
       dueDate: subtractDaysIso(trip?.dateFrom, 22),
       paidAt: hasInstallments ? "" : toIsoDate(member.updatedAt),
+      exchangeRateText: (Math.max(0, overrides.exchangeRate ?? 0)).toFixed(2),
     },
     lodging: {
       checkInDateFrom: addDaysIso(trip?.dateFrom, 1),
       checkInDateTo: addDaysIso(trip?.dateFrom, 2),
       checkOutDate: trip?.dateTo ?? "",
     },
-    legal: {
-      applyExonerationAnnex: member.wantsInsurance === false,
-    },
     sale: {
       isResale: false,
-    },
-    annexes: {
-      insuranceAndCoverage: {
-        enabled: true,
-        version: "v1",
-        signedAt: "",
-        cutoffHours: 48,
-      },
     },
     lucitours: {
       signatories: {
@@ -348,7 +329,7 @@ export const mapTripMemberToContractDraft = (
   }
 
   if (!payload.lucitours.signatories.includeEdwin && !payload.lucitours.signatories.includeErick) {
-    missingFields.push("Firma Lucitours: seleccionar firmante (Edwin, Erick o ambos)");
+    missingFields.push("Firma Lucitours: seleccionar firmante (Edwin o Erick)");
   }
 
   for (const [index, companion] of payload.travelers.companions.entries()) {
