@@ -27,6 +27,18 @@ const getOrgId = (): string => {
   return process.env.NEXT_PUBLIC_ORG_ID?.trim() || "lucitour";
 };
 
+const shouldBypassNgrokWarning = (apiBaseUrl: string): boolean => {
+  return apiBaseUrl.includes(".ngrok-free.dev") || apiBaseUrl.includes(".ngrok-free.app");
+};
+
+const buildApiHeaders = (apiBaseUrl: string, init?: HeadersInit): Headers => {
+  const headers = new Headers(init);
+  if (shouldBypassNgrokWarning(apiBaseUrl)) {
+    headers.set("ngrok-skip-browser-warning", "true");
+  }
+  return headers;
+};
+
 const roleFromApi = (roles: string[]): Role => {
   const priority: Role[] = [
     Role.ADMIN,
@@ -95,12 +107,13 @@ export const SessionProvider = ({ children }: SessionProviderProps) => {
       }
 
       try {
-        const response = await fetch(`${getApiBaseUrl()}/auth/me`, {
+        const apiBaseUrl = getApiBaseUrl();
+        const response = await fetch(`${apiBaseUrl}/auth/me`, {
           method: "GET",
-          headers: {
+          headers: buildApiHeaders(apiBaseUrl, {
             Authorization: `Bearer ${accessToken}`,
             "x-org-id": getOrgId(),
-          },
+          }),
         });
 
         if (!response.ok) {
@@ -165,12 +178,13 @@ export const SessionProvider = ({ children }: SessionProviderProps) => {
 
   const login = async (identifier: string, password: string): Promise<{ ok: boolean; error?: string }> => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/auth/login`, {
+      const apiBaseUrl = getApiBaseUrl();
+      const response = await fetch(`${apiBaseUrl}/auth/login`, {
         method: "POST",
-        headers: {
+        headers: buildApiHeaders(apiBaseUrl, {
           "Content-Type": "application/json",
           "x-org-id": getOrgId(),
-        },
+        }),
         body: JSON.stringify({ identifier, password }),
       });
 
@@ -211,12 +225,13 @@ export const SessionProvider = ({ children }: SessionProviderProps) => {
       typeof window !== "undefined" ? localStorage.getItem(ACCESS_TOKEN_KEY) : null;
 
     if (accessToken) {
-      void fetch(`${getApiBaseUrl()}/auth/logout`, {
+      const apiBaseUrl = getApiBaseUrl();
+      void fetch(`${apiBaseUrl}/auth/logout`, {
         method: "POST",
-        headers: {
+        headers: buildApiHeaders(apiBaseUrl, {
           Authorization: `Bearer ${accessToken}`,
           "x-org-id": getOrgId(),
-        },
+        }),
       }).catch(() => undefined);
     }
 

@@ -14,6 +14,14 @@ const getApiBaseUrl = (): string => {
 
 const getOrgId = (): string => process.env.NEXT_PUBLIC_ORG_ID?.trim() || "lucitour";
 
+const buildApiHeaders = (apiBaseUrl: string, init?: HeadersInit): Headers => {
+  const headers = new Headers(init);
+  if (apiBaseUrl.includes(".ngrok-free.dev") || apiBaseUrl.includes(".ngrok-free.app")) {
+    headers.set("ngrok-skip-browser-warning", "true");
+  }
+  return headers;
+};
+
 export default function ResetPasswordPage() {
   const [token, setToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -50,12 +58,13 @@ export default function ResetPasswordPage() {
 
     setSubmitting(true);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/auth/reset-password`, {
+      const apiBaseUrl = getApiBaseUrl();
+      const response = await fetch(`${apiBaseUrl}/auth/reset-password`, {
         method: "POST",
-        headers: {
+        headers: buildApiHeaders(apiBaseUrl, {
           "Content-Type": "application/json",
           "x-org-id": getOrgId(),
-        },
+        }),
         body: JSON.stringify({ token: token.trim(), newPassword }),
       });
 

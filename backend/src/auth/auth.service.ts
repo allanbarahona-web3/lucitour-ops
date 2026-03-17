@@ -310,61 +310,67 @@ export class AuthService implements OnModuleInit {
     requestMeta: { ipAddress?: string; userAgent?: string },
   ): Promise<void> {
     const email = emailInput.trim().toLowerCase();
-
-    await this.prisma.withOrg(orgId, async (tx) => {
-      const user = await tx.user.findFirst({
-        where: {
-          orgId,
-          email,
-          isActive: true,
-        },
-      });
-
-      // Always return success semantics to avoid email enumeration.
-      if (!user) {
-        return;
-      }
-
-      const ttlMinutes = Number(process.env.RESET_PASSWORD_TOKEN_TTL_MINUTES ?? '30');
-      const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
-      const rawToken = randomBytes(RESET_TOKEN_BYTES).toString('base64url');
-      const tokenHash = this.hashResetToken(rawToken);
-
-      await tx.passwordResetToken.updateMany({
-        where: {
-          orgId,
-          userId: user.id,
-          usedAt: null,
-          expiresAt: {
-            gt: new Date(),
+    const pendingEmail = await this.prisma.withOrg<{ to: string; token: string } | null>(
+      orgId,
+      async (tx) => {
+        const user = await tx.user.findFirst({
+          where: {
+            orgId,
+            email,
+            isActive: true,
           },
-        },
-        data: {
-          usedAt: new Date(),
-        },
-      });
+        });
 
-      await tx.passwordResetToken.create({
-        data: {
+        // Always return success semantics to avoid email enumeration.
+        if (!user) {
+          return null;
+        }
+
+        const ttlMinutes = Number(process.env.RESET_PASSWORD_TOKEN_TTL_MINUTES ?? '30');
+        const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
+        const rawToken = randomBytes(RESET_TOKEN_BYTES).toString('base64url');
+        const tokenHash = this.hashResetToken(rawToken);
+
+        await tx.passwordResetToken.updateMany({
+          where: {
+            orgId,
+            userId: user.id,
+            usedAt: null,
+            expiresAt: {
+              gt: new Date(),
+            },
+          },
+          data: {
+            usedAt: new Date(),
+          },
+        });
+
+        await tx.passwordResetToken.create({
+          data: {
+            orgId,
+            userId: user.id,
+            tokenHash,
+            expiresAt,
+            requestedByIp: requestMeta.ipAddress,
+          },
+        });
+
+        await this.createAuthEvent(tx, {
           orgId,
           userId: user.id,
-          tokenHash,
-          expiresAt,
-          requestedByIp: requestMeta.ipAddress,
-        },
-      });
-
-      await this.createAuthEvent(tx, {
-        orgId,
-        userId: user.id,
         email: user.email,
         eventType: AuthEventType.PASSWORD_RESET_REQUESTED,
         ipAddress: requestMeta.ipAddress,
         userAgent: requestMeta.userAgent,
       });
 
-      await this.sendPasswordResetEmail(user.email, rawToken);
-    });
+        return { to: user.email, token: rawToken };
+      },
+    );
+
+    if (pendingEmail) {
+      await this.sendPasswordResetEmail(pendingEmail.to, pendingEmail.token);
+    }
   }
 
   async resetPassword(
