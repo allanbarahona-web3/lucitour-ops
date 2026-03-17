@@ -4064,28 +4064,32 @@ export const TripMembersTable = ({
                         type="file"
                         multiple
                         onChange={(event) => {
-                          const nextDocs = addDocuments(
-                            member,
-                            "MINOR_PERMIT",
-                            "Acompanante menor",
-                            event.target.files,
-                          );
-                          if (nextDocs.length !== member.documents.length) {
-                            scheduleUpdate(
-                              member.id,
-                              {
-                                documents: nextDocs,
-                                docFlags: {
-                                  ...member.docFlags,
-                                  minorPermit: getDocsByType(
-                                    { ...member, documents: nextDocs },
-                                    "MINOR_PERMIT",
-                                  ).length > 0,
-                                },
-                              },
-                              `${member.id}:documents:minorPermit`,
+                          const files = event.target.files;
+                          event.currentTarget.value = "";
+                          void (async () => {
+                            const nextDocs = await uploadDocumentsToBackend(
+                              member,
+                              "MINOR_PERMIT",
+                              "Acompanante menor",
+                              files,
                             );
-                          }
+                            if (nextDocs.length !== member.documents.length) {
+                              scheduleUpdate(
+                                member.id,
+                                {
+                                  documents: nextDocs,
+                                  docFlags: {
+                                    ...member.docFlags,
+                                    minorPermit: getDocsByType(
+                                      { ...member, documents: nextDocs },
+                                      "MINOR_PERMIT",
+                                    ).length > 0,
+                                  },
+                                },
+                                `${member.id}:documents:minorPermit`,
+                              );
+                            }
+                          })();
                         }}
                       />
                       {getDocsByType(member, "MINOR_PERMIT").length > 0 ? (
