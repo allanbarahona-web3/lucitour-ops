@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   OnModuleInit,
   ServiceUnavailableException,
   UnauthorizedException,
@@ -20,12 +21,36 @@ const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_WINDOW_MINUTES = 15;
 const RESET_TOKEN_BYTES = 32;
 
+const maskIdentifier = (identifier: string): string => {
+  if (!identifier) {
+    return '-';
+  }
+
+  if (identifier.includes('@')) {
+    const [localPart, domain = ''] = identifier.split('@');
+    const visible = localPart.slice(0, 2);
+    return `${visible}${localPart.length > 2 ? '***' : ''}@${domain}`;
+  }
+
+  const visible = identifier.slice(0, 2);
+  return `${visible}${identifier.length > 2 ? '***' : ''}`;
+};
+
 @Injectable()
 export class AuthService implements OnModuleInit {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
   ) {}
+
+  private normalizeUserAgent(input?: string): string {
+    if (!input) {
+      return '-';
+    }
+    return input.length <= 120 ? input : `${input.slice(0, 117)}...`;
+  }
 
   async onModuleInit(): Promise<void> {
     const seedPassword = process.env.SEED_MASTER_PASSWORD?.trim();
@@ -82,8 +107,14 @@ export class AuthService implements OnModuleInit {
     const identifier = input.identifier.trim().toLowerCase();
     const isEmailLogin = identifier.includes('@');
     const usernamePrefix = isEmailLogin ? null : identifier;
+    const startedAt = Date.now();
 
-    return this.prisma.withOrg(orgId, async (tx) => {
+    this.logger.log(
+      `[login] attempt org=${orgId} identifier=${maskIdentifier(identifier)} ip=${requestMeta.ipAddress ?? '-'} ua=${this.normalizeUserAgent(requestMeta.userAgent)}`,
+    );
+
+    try {
+      const result = await this.prisma.withOrg(orgId, async (tx) => {
       const windowStart = new Date(Date.now() - LOGIN_WINDOW_MINUTES * 60 * 1000);
       const failedCount = await tx.authEvent.count({
         where: {
@@ -98,6 +129,9 @@ export class AuthService implements OnModuleInit {
       });
 
       if (failedCount >= LOGIN_MAX_ATTEMPTS) {
+        this.logger.warn(
+          `[login] locked org=${orgId} identifier=${maskIdentifier(identifier)} ip=${requestMeta.ipAddress ?? '-'} failedCount=${failedCount}`,
+        );
         await this.createAuthEvent(tx, {
           orgId,
           email: identifier,
@@ -120,6 +154,9 @@ export class AuthService implements OnModuleInit {
       });
 
       if (!isEmailLogin && matchingUsers.length > 1) {
+        this.logger.warn(
+          `[login] ambiguous-identifier org=${orgId} identifier=${maskIdentifier(identifier)} ip=${requestMeta.ipAddress ?? '-'} matches=${matchingUsers.length}`,
+        );
         throw new UnauthorizedException('Usuario ambiguo. Inicia sesion con correo completo.');
       }
 
@@ -130,6 +167,14 @@ export class AuthService implements OnModuleInit {
         : false;
 
       if (!user || !passwordOk || !user.isActive) {
+        const reason = !user
+          ? 'user-not-found'
+          : !passwordOk
+            ? 'invalid-password'
+            : 'inactive-user';
+        this.logger.warn(
+          `[login] denied org=${orgId} identifier=${maskIdentifier(identifier)} ip=${requestMeta.ipAddress ?? '-'} reason=${reason}`,
+        );
         await this.createAuthEvent(tx, {
           orgId,
           userId: user?.id,
@@ -202,7 +247,25 @@ export class AuthService implements OnModuleInit {
           roles,
         },
       };
-    });
+      });
+
+      this.logger.log(
+        `[login] success org=${orgId} userId=${result.user.id} email=${maskIdentifier(result.user.email)} ip=${requestMeta.ipAddress ?? '-'} elapsedMs=${Date.now() - startedAt}`,
+      );
+
+      return result;
+    } catch (error) {
+      if (error instanceof UnauthorizedException || error instanceof BadRequestException) {
+        throw error;
+      }
+
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `[login] error org=${orgId} identifier=${maskIdentifier(identifier)} ip=${requestMeta.ipAddress ?? '-'} elapsedMs=${Date.now() - startedAt} message=${errorMessage}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
   }
 
   async refresh(

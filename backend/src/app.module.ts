@@ -8,6 +8,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { SignaturesModule } from './signatures/signatures.module';
 import { AuthModule } from './auth/auth.module';
+import { StorageModule } from './storage/storage.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { AuthModule } from './auth/auth.module';
       },
     ]),
     PrismaModule,
+    StorageModule,
     AuthModule,
     ContractsModule,
     SignaturesModule,

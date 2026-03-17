@@ -170,9 +170,12 @@ export type DocumentType =
 
 export interface DocumentUpload {
   id: string;
+  externalDocumentId?: string;
   type: DocumentType;
   fileName: string;
   ownerName: string;
+  objectKey?: string;
+  downloadUrl?: string;
   concept?: string;
   conceptOther?: string;
   idIsValid?: boolean;

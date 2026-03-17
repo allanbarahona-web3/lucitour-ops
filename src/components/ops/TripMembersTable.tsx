@@ -74,6 +74,53 @@ const isPending = (member: TripMember) =>
 const normalizeName = (value: string) => value.trim().toLowerCase();
 const NON_TRAVELING_GUARDIAN_VALUE = "__non_traveling_guardian__";
 
+type BackendContractDocumentType =
+  | "CEDULA_FRONT"
+  | "CEDULA_BACK"
+  | "PASSPORT"
+  | "MINOR_PERMIT"
+  | "INSURANCE"
+  | "PAYMENT_PROOF";
+
+const getApiBaseUrl = (): string => {
+  const value = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+  if (!value) {
+    throw new Error("Missing NEXT_PUBLIC_API_BASE_URL");
+  }
+  return value.replace(/\/$/, "");
+};
+
+const getOrgId = (): string => process.env.NEXT_PUBLIC_ORG_ID?.trim() || "lucitour";
+
+const fileToBase64 = async (file: File): Promise<string> => {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+};
+
+const mapBackendTypeToAppType = (type: BackendContractDocumentType): DocumentType => {
+  if (type === "CEDULA_FRONT" || type === "CEDULA_BACK") {
+    return "ID_CARD";
+  }
+  return type;
+};
+
+const syncDocFlagsFromDocuments = (
+  currentFlags: TripMember["docFlags"],
+  documents: DocumentUpload[],
+): TripMember["docFlags"] => ({
+  idCard: currentFlags.idCard || documents.some((doc) => doc.type === "ID_CARD"),
+  passport: currentFlags.passport || documents.some((doc) => doc.type === "PASSPORT"),
+  minorPermit: currentFlags.minorPermit || documents.some((doc) => doc.type === "MINOR_PERMIT"),
+  insurance: currentFlags.insurance || documents.some((doc) => doc.type === "INSURANCE"),
+  paymentProof: currentFlags.paymentProof || documents.some((doc) => doc.type === "PAYMENT_PROOF"),
+});
+
 interface TripMembersTableProps {
   tripId: string;
   tripName: string;
@@ -289,7 +336,61 @@ export const TripMembersTable = ({
       luggageUnitPrice: member.luggageUnitPrice ?? null,
       extraTours: member.extraTours ?? [],
     }));
-    setMembers(normalized);
+
+    const hydrated = await Promise.all(
+      normalized.map(async (member) => {
+        try {
+          const apiBaseUrl = getApiBaseUrl();
+          const response = await fetch(`${apiBaseUrl}/contracts/${member.id}/documents`, {
+            method: "GET",
+            headers: {
+              "x-org-id": getOrgId(),
+            },
+          });
+
+          if (!response.ok) {
+            return member;
+          }
+
+          const remoteDocs = (await response.json()) as Array<{
+            id: string;
+            type: BackendContractDocumentType;
+            objectKey: string;
+            originalName?: string | null;
+            ownerName?: string | null;
+            concept?: string | null;
+            conceptOther?: string | null;
+            downloadUrl: string;
+          }>;
+
+          if (remoteDocs.length === 0) {
+            return member;
+          }
+
+          const mappedDocs: DocumentUpload[] = remoteDocs.map((doc) => ({
+            id: `${member.id}-${doc.id}`,
+            externalDocumentId: doc.id,
+            type: mapBackendTypeToAppType(doc.type),
+            fileName: doc.originalName || "archivo",
+            ownerName: doc.ownerName || "Titular",
+            objectKey: doc.objectKey,
+            downloadUrl: doc.downloadUrl,
+            concept: doc.concept || "",
+            conceptOther: doc.conceptOther || "",
+          }));
+
+          return {
+            ...member,
+            documents: mappedDocs,
+            docFlags: syncDocFlagsFromDocuments(member.docFlags, mappedDocs),
+          };
+        } catch {
+          return member;
+        }
+      }),
+    );
+
+    setMembers(hydrated);
   };
 
   const loadModifications = async () => {
@@ -1053,26 +1154,109 @@ export const TripMembersTable = ({
     { value: "OTHER", label: "Otros" },
   ];
 
-  const addDocuments = (
+  const resolveBackendDocumentType = (
+    requestedType: DocumentType,
+    index: number,
+    existingIdCardCount: number,
+  ): BackendContractDocumentType => {
+    if (requestedType === "ID_CARD") {
+      return (existingIdCardCount + index) % 2 === 0 ? "CEDULA_FRONT" : "CEDULA_BACK";
+    }
+    return requestedType;
+  };
+
+  const uploadDocumentsToBackend = async (
     member: TripMember,
     type: DocumentType,
     ownerName: string,
     files: FileList | null,
     meta?: { concept?: string; conceptOther?: string },
-  ) => {
+  ): Promise<DocumentUpload[]> => {
     if (!files || files.length === 0) {
       return member.documents;
     }
-    const timestamp = Date.now();
-    const nextDocs = Array.from(files).map((file, index) => ({
-      id: `${member.id}-${type}-${timestamp}-${index}`,
-      type,
-      fileName: file.name,
-      ownerName,
-      concept: meta?.concept ?? "",
-      conceptOther: meta?.conceptOther ?? "",
-    }));
-    return [...member.documents, ...nextDocs];
+
+    let apiBaseUrl: string;
+    try {
+      apiBaseUrl = getApiBaseUrl();
+    } catch {
+      window.alert("Falta configurar NEXT_PUBLIC_API_BASE_URL para subir documentos.");
+      return member.documents;
+    }
+
+    const existingIdCardCount =
+      type === "ID_CARD"
+        ? getDocsByType(member, "ID_CARD").filter(
+            (doc) => normalizeName(doc.ownerName) === normalizeName(ownerName),
+          ).length
+        : 0;
+
+    const uploadedDocs: DocumentUpload[] = [];
+    const filesArray = Array.from(files);
+
+    for (let index = 0; index < filesArray.length; index += 1) {
+      const file = filesArray[index];
+      const backendType = resolveBackendDocumentType(type, index, existingIdCardCount);
+
+      try {
+        const fileBase64 = await fileToBase64(file);
+        const response = await fetch(`${apiBaseUrl}/contracts/${member.id}/documents`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-org-id": getOrgId(),
+          },
+          body: JSON.stringify({
+            type: backendType,
+            fileName: file.name,
+            contentType: file.type || "application/octet-stream",
+            fileBase64,
+            uploadedByUserId: currentUser.id,
+            ownerName,
+            concept: meta?.concept,
+            conceptOther: meta?.conceptOther,
+          }),
+        });
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { message?: string } | null;
+          throw new Error(payload?.message || "No se pudo subir el documento");
+        }
+
+        const created = (await response.json()) as {
+          id: string;
+          type: BackendContractDocumentType;
+          objectKey: string;
+          originalName?: string | null;
+          ownerName?: string | null;
+          concept?: string | null;
+          conceptOther?: string | null;
+          downloadUrl: string;
+        };
+
+        uploadedDocs.push({
+          id: `${member.id}-${created.id}`,
+          externalDocumentId: created.id,
+          type: mapBackendTypeToAppType(created.type),
+          fileName: created.originalName || file.name,
+          ownerName: created.ownerName || ownerName,
+          objectKey: created.objectKey,
+          downloadUrl: created.downloadUrl,
+          concept: created.concept || meta?.concept || "",
+          conceptOther: created.conceptOther || meta?.conceptOther || "",
+        });
+      } catch (error) {
+        window.alert(
+          `No se pudo subir ${file.name}${error instanceof Error ? `: ${error.message}` : ""}`,
+        );
+      }
+    }
+
+    if (uploadedDocs.length === 0) {
+      return member.documents;
+    }
+
+    return [...member.documents, ...uploadedDocs];
   };
 
   const removeDocument = (member: TripMember, docId: string) =>
@@ -3282,25 +3466,29 @@ export const TripMembersTable = ({
                                         multiple
                                         disabled={step5Locked}
                                         onChange={(event) => {
-                                          const nextDocs = addDocuments(
-                                            member,
-                                            item.type,
-                                            getOwnerValue(member.id, item.type),
-                                            event.target.files,
-                                            item.key === "paymentProof"
-                                              ? {
-                                                  concept: getConceptValue(member.id, item.type),
-                                                  conceptOther: getConceptOtherValue(member.id, item.type),
-                                                }
-                                              : undefined,
-                                          );
-                                          if (nextDocs.length !== member.documents.length) {
-                                            scheduleUpdate(
-                                              member.id,
-                                              { documents: nextDocs },
-                                              `${member.id}:documents:${item.key}`,
+                                          const files = event.target.files;
+                                          event.currentTarget.value = "";
+                                          void (async () => {
+                                            const nextDocs = await uploadDocumentsToBackend(
+                                              member,
+                                              item.type,
+                                              getOwnerValue(member.id, item.type),
+                                              files,
+                                              item.key === "paymentProof"
+                                                ? {
+                                                    concept: getConceptValue(member.id, item.type),
+                                                    conceptOther: getConceptOtherValue(member.id, item.type),
+                                                  }
+                                                : undefined,
                                             );
-                                          }
+                                            if (nextDocs.length !== member.documents.length) {
+                                              scheduleUpdate(
+                                                member.id,
+                                                { documents: nextDocs },
+                                                `${member.id}:documents:${item.key}`,
+                                              );
+                                            }
+                                          })();
                                         }}
                                       />
                                     </div>
@@ -3309,7 +3497,19 @@ export const TripMembersTable = ({
                                     <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-600">
                                       {docs.map((doc) => (
                                         <span key={doc.id} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-0.5">
-                                          {doc.fileName} · {doc.ownerName}
+                                          {doc.downloadUrl ? (
+                                            <a
+                                              href={doc.downloadUrl}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className="font-semibold text-cyan-700 hover:underline"
+                                            >
+                                              {doc.fileName}
+                                            </a>
+                                          ) : (
+                                            doc.fileName
+                                          )}
+                                          · {doc.ownerName}
                                           {formatDocConcept(doc) ? ` · ${formatDocConcept(doc)}` : ""}
                                           {!step5Locked ? (
                                             <button
@@ -5294,21 +5494,25 @@ export const TripMembersTable = ({
                     type="file"
                     multiple
                     onChange={(event) => {
-                      const nextDocs = addDocuments(
-                        draft,
-                        item.type,
-                        getOwnerValue(draft.id, item.type),
-                        event.target.files,
-                        item.key === "paymentProof"
-                          ? {
-                              concept: getConceptValue(draft.id, item.type),
-                              conceptOther: getConceptOtherValue(draft.id, item.type),
-                            }
-                          : undefined,
-                      );
-                      if (nextDocs.length !== draft.documents.length) {
-                        updateDraft({ documents: nextDocs });
-                      }
+                      const files = event.target.files;
+                      event.currentTarget.value = "";
+                      void (async () => {
+                        const nextDocs = await uploadDocumentsToBackend(
+                          draft,
+                          item.type,
+                          getOwnerValue(draft.id, item.type),
+                          files,
+                          item.key === "paymentProof"
+                            ? {
+                                concept: getConceptValue(draft.id, item.type),
+                                conceptOther: getConceptOtherValue(draft.id, item.type),
+                              }
+                            : undefined,
+                        );
+                        if (nextDocs.length !== draft.documents.length) {
+                          updateDraft({ documents: nextDocs });
+                        }
+                      })();
                     }}
                   />
                 </div>
@@ -5320,7 +5524,19 @@ export const TripMembersTable = ({
                       key={doc.id}
                       className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-0.5"
                     >
-                      {doc.fileName} · {doc.ownerName}
+                      {doc.downloadUrl ? (
+                        <a
+                          href={doc.downloadUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-semibold text-cyan-700 hover:underline"
+                        >
+                          {doc.fileName}
+                        </a>
+                      ) : (
+                        doc.fileName
+                      )}
+                      · {doc.ownerName}
                       {formatDocConcept(doc) ? ` · ${formatDocConcept(doc)}` : ""}
                       <button
                         type="button"
@@ -5921,7 +6137,19 @@ export const TripMembersTable = ({
                             <div className="mt-1 flex flex-wrap gap-2">
                               {docs.map((doc) => (
                                 <span key={doc.id} className="rounded-full border border-slate-200 bg-white px-2 py-0.5">
-                                  {doc.fileName} · {doc.ownerName}
+                                  {doc.downloadUrl ? (
+                                    <a
+                                      href={doc.downloadUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="font-semibold text-cyan-700 hover:underline"
+                                    >
+                                      {doc.fileName}
+                                    </a>
+                                  ) : (
+                                    doc.fileName
+                                  )}
+                                  · {doc.ownerName}
                                   {formatDocConcept(doc) ? ` · ${formatDocConcept(doc)}` : ""}
                                 </span>
                               ))}

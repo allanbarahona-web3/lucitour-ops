@@ -105,20 +105,28 @@ model SignatureRequest {
   status                       SignatureRequestStatus @default(PENDING_OTP)
   publicToken                  String                 @unique @default(cuid())
   contractFileName             String?
-  unsignedPdfBase64            String?                @db.Text
+  unsignedPdfObjectKey         String?
+  unsignedPdfSha256            String?
+  unsignedPdfSizeBytes         Int?
   otpCodeHash                  String?
   otpSentAt                    DateTime?
   otpAttemptCount              Int                    @default(0)
   otpLockedUntil               DateTime?
   otpValidatedAt               DateTime?
-  signatureImageBase64         String?                @db.Text
+  signatureImageObjectKey      String?
+  signatureImageSha256         String?
+  signatureImageSizeBytes      Int?
   submittedAt                  DateTime?
   reviewedByUserId             String?
   approvedAt                   DateTime?
   rejectedAt                   DateTime?
   rejectionReason              String?
-  lucitoursSignatureImageBase64 String?               @db.Text
-  signedPdfBase64              String?                @db.Text
+  lucitoursSignatureObjectKey  String?
+  lucitoursSignatureSha256     String?
+  lucitoursSignatureSizeBytes  Int?
+  signedPdfObjectKey           String?
+  signedPdfSha256              String?
+  signedPdfSizeBytes           Int?
   createdAt                    DateTime               @default(now())
   updatedAt                    DateTime               @updatedAt
   events                       SignatureRequestEvent[]
@@ -126,6 +134,28 @@ model SignatureRequest {
   @@index([orgId, status])
   @@index([orgId, contractId])
   @@map("signature_requests")
+}
+
+model ContractDocument {
+  id              String               @id @default(cuid())
+  orgId           String
+  contractId      String
+  type            ContractDocumentType
+  objectKey       String               @unique
+  originalName    String?
+  ownerName       String?
+  concept         String?
+  conceptOther    String?
+  contentType     String
+  sizeBytes       Int
+  sha256          String
+  uploadedByUserId String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([orgId, contractId])
+  @@index([orgId, type])
+  @@map("contract_documents")
 }
 
 model SignatureRequestEvent {
@@ -166,6 +196,17 @@ enum SignatureActorType {
   CLIENT
   CONTRACTOR
   ADMIN
+}
+
+enum ContractDocumentType {
+  CEDULA_FRONT
+  CEDULA_BACK
+  PASSPORT
+  MINOR_PERMIT
+  INSURANCE
+  PAYMENT_PROOF
+  PROFILE_PHOTO_1
+  PROFILE_PHOTO_2
 }
 
 enum AppRole {

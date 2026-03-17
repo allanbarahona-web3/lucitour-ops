@@ -10,8 +10,9 @@ import {
   SignatureEventType,
   SignatureRequestStatus,
 } from '@prisma/client';
-import { createHash, randomInt } from 'crypto';
+import { createHash, randomInt, randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
 import { CreateSignatureRequestDto } from './dto/create-signature-request.dto';
 import { RequestSignatureOtpDto } from './dto/request-signature-otp.dto';
 import { ReviewSignatureRequestDto } from './dto/review-signature-request.dto';
@@ -23,9 +24,20 @@ const OTP_RESEND_COOLDOWN_SECONDS = 45;
 
 @Injectable()
 export class SignaturesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   async createRequest(orgId: string, payload: CreateSignatureRequestDto) {
+    const unsignedPdfUpload = payload.unsignedPdfBase64
+      ? await this.storage.putBase64({
+          objectKey: this.buildObjectKey(orgId, payload.contractId, 'unsigned', 'pdf'),
+          base64: payload.unsignedPdfBase64,
+          contentType: 'application/pdf',
+        })
+      : null;
+
     return this.prisma.withOrg(orgId, async (tx) => {
       const request = await tx.signatureRequest.create({
         data: {
@@ -34,7 +46,9 @@ export class SignaturesService {
           recipientEmail: payload.recipientEmail,
           recipientName: payload.recipientName,
           contractFileName: payload.contractFileName,
-          unsignedPdfBase64: payload.unsignedPdfBase64,
+          unsignedPdfObjectKey: unsignedPdfUpload?.objectKey,
+          unsignedPdfSha256: unsignedPdfUpload?.sha256,
+          unsignedPdfSizeBytes: unsignedPdfUpload?.sizeBytes,
           status: SignatureRequestStatus.PENDING_OTP,
         },
       });
@@ -120,6 +134,12 @@ export class SignaturesService {
   }
 
   async submitSignature(orgId: string, requestId: string, payload: SubmitSignatureDto) {
+    const signatureUpload = await this.storage.putBase64({
+      objectKey: this.buildObjectKey(orgId, requestId, 'client-signature', 'png'),
+      base64: payload.signatureImageBase64,
+      contentType: 'image/png',
+    });
+
     return this.prisma.withOrg(orgId, async (tx) => {
       const request = await tx.signatureRequest.findFirst({
         where: {
@@ -179,7 +199,9 @@ export class SignaturesService {
           id: request.id,
         },
         data: {
-          signatureImageBase64: payload.signatureImageBase64,
+          signatureImageObjectKey: signatureUpload.objectKey,
+          signatureImageSha256: signatureUpload.sha256,
+          signatureImageSizeBytes: signatureUpload.sizeBytes,
           otpAttemptCount: 0,
           otpLockedUntil: null,
           otpValidatedAt: now,
@@ -203,6 +225,24 @@ export class SignaturesService {
   }
 
   async reviewRequest(orgId: string, requestId: string, payload: ReviewSignatureRequestDto) {
+    const contractorSignatureUpload =
+      payload.decision === 'approve' && payload.lucitoursSignatureImageBase64
+        ? await this.storage.putBase64({
+            objectKey: this.buildObjectKey(orgId, requestId, 'lucitours-signature', 'png'),
+            base64: payload.lucitoursSignatureImageBase64,
+            contentType: 'image/png',
+          })
+        : null;
+
+    const signedPdfUpload =
+      payload.decision === 'approve' && payload.signedPdfBase64
+        ? await this.storage.putBase64({
+            objectKey: this.buildObjectKey(orgId, requestId, 'signed', 'pdf'),
+            base64: payload.signedPdfBase64,
+            contentType: 'application/pdf',
+          })
+        : null;
+
     return this.prisma.withOrg(orgId, async (tx) => {
       const request = await tx.signatureRequest.findFirst({
         where: {
@@ -230,8 +270,12 @@ export class SignaturesService {
             reviewedByUserId: payload.reviewerUserId,
             approvedAt: now,
             status: SignatureRequestStatus.APPROVED,
-            lucitoursSignatureImageBase64: payload.lucitoursSignatureImageBase64,
-            signedPdfBase64: payload.signedPdfBase64,
+            lucitoursSignatureObjectKey: contractorSignatureUpload?.objectKey,
+            lucitoursSignatureSha256: contractorSignatureUpload?.sha256,
+            lucitoursSignatureSizeBytes: contractorSignatureUpload?.sizeBytes,
+            signedPdfObjectKey: signedPdfUpload?.objectKey,
+            signedPdfSha256: signedPdfUpload?.sha256,
+            signedPdfSizeBytes: signedPdfUpload?.sizeBytes,
           },
         });
 
@@ -294,12 +338,32 @@ export class SignaturesService {
         throw new NotFoundException('Signature request not found');
       }
 
-      return request;
+      return {
+        ...request,
+        unsignedPdfUrl: request.unsignedPdfObjectKey
+          ? await this.storage.getSignedDownloadUrl(request.unsignedPdfObjectKey)
+          : null,
+        signatureImageUrl: request.signatureImageObjectKey
+          ? await this.storage.getSignedDownloadUrl(request.signatureImageObjectKey)
+          : null,
+        lucitoursSignatureUrl: request.lucitoursSignatureObjectKey
+          ? await this.storage.getSignedDownloadUrl(request.lucitoursSignatureObjectKey)
+          : null,
+        signedPdfUrl: request.signedPdfObjectKey
+          ? await this.storage.getSignedDownloadUrl(request.signedPdfObjectKey)
+          : null,
+      };
     });
   }
 
   private hashOtp(otpCode: string): string {
     return createHash('sha256').update(otpCode).digest('hex');
+  }
+
+  private buildObjectKey(orgId: string, contractOrRequestId: string, kind: string, ext: string): string {
+    const safeOrgId = orgId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeRef = contractOrRequestId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    return `contracts/${safeOrgId}/${safeRef}/${kind}-${randomUUID()}.${ext}`;
   }
 
   private async createEvent(
