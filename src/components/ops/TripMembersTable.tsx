@@ -186,6 +186,8 @@ export const TripMembersTable = ({
   const [docConcepts, setDocConcepts] = useState<
     Record<string, Record<DocumentType, { concept: string; conceptOther: string }>>
   >({});
+  const [uploadingByMember, setUploadingByMember] = useState<Record<string, number>>({});
+  const [uploadFeedbackByMember, setUploadFeedbackByMember] = useState<Record<string, string>>({});
   const [agentTab, setAgentTab] = useState<"active" | "sent">("active");
   const [expandedCompanionByMember, setExpandedCompanionByMember] = useState<
     Record<string, number | null>
@@ -1176,11 +1178,28 @@ export const TripMembersTable = ({
       return member.documents;
     }
 
+    setUploadingByMember((prev) => ({
+      ...prev,
+      [member.id]: (prev[member.id] ?? 0) + 1,
+    }));
+    setUploadFeedbackByMember((prev) => ({
+      ...prev,
+      [member.id]: "Subiendo documentos...",
+    }));
+
     let apiBaseUrl: string;
     try {
       apiBaseUrl = getApiBaseUrl();
     } catch {
       window.alert("Falta configurar NEXT_PUBLIC_API_BASE_URL para subir documentos.");
+      setUploadFeedbackByMember((prev) => ({
+        ...prev,
+        [member.id]: "Falta configurar API base URL.",
+      }));
+      setUploadingByMember((prev) => ({
+        ...prev,
+        [member.id]: Math.max(0, (prev[member.id] ?? 1) - 1),
+      }));
       return member.documents;
     }
 
@@ -1253,8 +1272,26 @@ export const TripMembersTable = ({
     }
 
     if (uploadedDocs.length === 0) {
+      setUploadFeedbackByMember((prev) => ({
+        ...prev,
+        [member.id]: "No se pudo subir ningun archivo.",
+      }));
+      setUploadingByMember((prev) => ({
+        ...prev,
+        [member.id]: Math.max(0, (prev[member.id] ?? 1) - 1),
+      }));
       return member.documents;
     }
+
+    setUploadFeedbackByMember((prev) => ({
+      ...prev,
+      [member.id]: `Se subieron ${uploadedDocs.length} archivo(s).`,
+    }));
+    setUploadingByMember((prev) => ({
+      ...prev,
+      [member.id]: Math.max(0, (prev[member.id] ?? 1) - 1),
+    }));
+    window.alert(`Documento(s) subido(s): ${uploadedDocs.length}`);
 
     return [...member.documents, ...uploadedDocs];
   };
@@ -3455,6 +3492,14 @@ export const TripMembersTable = ({
                                     ) : null}
                                     <div className="space-y-1 md:col-span-2">
                                       <div className="text-[11px] text-slate-500">Adjuntar documentos</div>
+                                      {uploadingByMember[member.id] ? (
+                                        <div className="text-[11px] font-semibold text-cyan-700">Subiendo...</div>
+                                      ) : null}
+                                      {uploadFeedbackByMember[member.id] ? (
+                                        <div className="text-[11px] text-emerald-700">
+                                          {uploadFeedbackByMember[member.id]}
+                                        </div>
+                                      ) : null}
                                       {item.key === "idCard" ? (
                                         <div className="text-[11px] font-semibold text-amber-700">
                                           Subir cédula frontal y posterior (2 archivos por persona).
@@ -3464,7 +3509,7 @@ export const TripMembersTable = ({
                                         className={inputClassName}
                                         type="file"
                                         multiple
-                                        disabled={step5Locked}
+                                        disabled={step5Locked || Boolean(uploadingByMember[member.id])}
                                         onChange={(event) => {
                                           const files = event.target.files;
                                           event.currentTarget.value = "";
@@ -4063,6 +4108,7 @@ export const TripMembersTable = ({
                         className={inputClassName}
                         type="file"
                         multiple
+                        disabled={Boolean(uploadingByMember[member.id])}
                         onChange={(event) => {
                           const files = event.target.files;
                           event.currentTarget.value = "";
@@ -5488,6 +5534,12 @@ export const TripMembersTable = ({
                 ) : null}
                 <div className="space-y-1 md:col-span-2">
                   <div className="text-[11px] text-slate-500">Adjuntar documentos</div>
+                  {uploadingByMember[draft.id] ? (
+                    <div className="text-[11px] font-semibold text-cyan-700">Subiendo...</div>
+                  ) : null}
+                  {uploadFeedbackByMember[draft.id] ? (
+                    <div className="text-[11px] text-emerald-700">{uploadFeedbackByMember[draft.id]}</div>
+                  ) : null}
                   {item.key === "idCard" ? (
                     <div className="text-[11px] font-semibold text-amber-700">
                       Subir cédula frontal y posterior (2 archivos por persona).
@@ -5497,6 +5549,7 @@ export const TripMembersTable = ({
                     className={inputClassName}
                     type="file"
                     multiple
+                    disabled={Boolean(uploadingByMember[draft.id])}
                     onChange={(event) => {
                       const files = event.target.files;
                       event.currentTarget.value = "";

@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   Injectable,
+  Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ContractDocumentType } from '@prisma/client';
@@ -13,6 +14,8 @@ import { UploadContractDocumentDto } from './dto/upload-contract-document.dto';
 
 @Injectable()
 export class ContractsService {
+  private readonly logger = new Logger(ContractsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
@@ -63,36 +66,54 @@ export class ContractsService {
   }
 
   async uploadDocument(orgId: string, contractId: string, payload: UploadContractDocumentDto) {
-    const objectKey = this.buildDocumentObjectKey(orgId, contractId, payload.type);
-    const upload = await this.storage.putBase64({
-      objectKey,
-      base64: payload.fileBase64,
-      contentType: payload.contentType,
-    });
+    this.logger.log(
+      `[documents] upload:start org=${orgId} contractId=${contractId} type=${payload.type} file=${payload.fileName}`,
+    );
 
-    return this.prisma.withOrg(orgId, async (tx) => {
-      const created = await tx.contractDocument.create({
-        data: {
-          orgId,
-          contractId,
-          type: payload.type,
-          objectKey: upload.objectKey,
-          originalName: payload.fileName,
-          ownerName: payload.ownerName,
-          concept: payload.concept,
-          conceptOther: payload.conceptOther,
-          contentType: payload.contentType,
-          sizeBytes: upload.sizeBytes,
-          sha256: upload.sha256,
-          uploadedByUserId: payload.uploadedByUserId,
-        },
+    try {
+      const objectKey = this.buildDocumentObjectKey(orgId, contractId, payload.type);
+      const upload = await this.storage.putBase64({
+        objectKey,
+        base64: payload.fileBase64,
+        contentType: payload.contentType,
       });
 
-      return {
-        ...created,
-        downloadUrl: await this.storage.getSignedDownloadUrl(created.objectKey),
-      };
-    });
+      const result = await this.prisma.withOrg(orgId, async (tx) => {
+        const created = await tx.contractDocument.create({
+          data: {
+            orgId,
+            contractId,
+            type: payload.type,
+            objectKey: upload.objectKey,
+            originalName: payload.fileName,
+            ownerName: payload.ownerName,
+            concept: payload.concept,
+            conceptOther: payload.conceptOther,
+            contentType: payload.contentType,
+            sizeBytes: upload.sizeBytes,
+            sha256: upload.sha256,
+            uploadedByUserId: payload.uploadedByUserId,
+          },
+        });
+
+        return {
+          ...created,
+          downloadUrl: await this.storage.getSignedDownloadUrl(created.objectKey),
+        };
+      });
+
+      this.logger.log(
+        `[documents] upload:success org=${orgId} contractId=${contractId} type=${payload.type} objectKey=${result.objectKey}`,
+      );
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `[documents] upload:error org=${orgId} contractId=${contractId} type=${payload.type} message=${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
   }
 
   async listDocuments(orgId: string, contractId: string) {
@@ -107,12 +128,17 @@ export class ContractsService {
         },
       });
 
-      return Promise.all(
+      const items = await Promise.all(
         documents.map(async (document) => ({
           ...document,
           downloadUrl: await this.storage.getSignedDownloadUrl(document.objectKey),
         })),
       );
+
+      this.logger.log(
+        `[documents] list org=${orgId} contractId=${contractId} count=${items.length}`,
+      );
+      return items;
     });
   }
 
