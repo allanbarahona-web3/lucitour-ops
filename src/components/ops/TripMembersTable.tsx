@@ -92,6 +92,14 @@ const getApiBaseUrl = (): string => {
 
 const getOrgId = (): string => process.env.NEXT_PUBLIC_ORG_ID?.trim() || "lucitour";
 
+const buildApiHeaders = (apiBaseUrl: string, init?: HeadersInit): Headers => {
+  const headers = new Headers(init);
+  if (apiBaseUrl.includes(".ngrok-free.dev") || apiBaseUrl.includes(".ngrok-free.app")) {
+    headers.set("ngrok-skip-browser-warning", "true");
+  }
+  return headers;
+};
+
 const fileToBase64 = async (file: File): Promise<string> => {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
@@ -345,9 +353,9 @@ export const TripMembersTable = ({
           const apiBaseUrl = getApiBaseUrl();
           const response = await fetch(`${apiBaseUrl}/contracts/${member.id}/documents`, {
             method: "GET",
-            headers: {
+            headers: buildApiHeaders(apiBaseUrl, {
               "x-org-id": getOrgId(),
-            },
+            }),
           });
 
           if (!response.ok) {
@@ -1221,10 +1229,10 @@ export const TripMembersTable = ({
         const fileBase64 = await fileToBase64(file);
         const response = await fetch(`${apiBaseUrl}/contracts/${member.id}/documents`, {
           method: "POST",
-          headers: {
+          headers: buildApiHeaders(apiBaseUrl, {
             "Content-Type": "application/json",
             "x-org-id": getOrgId(),
-          },
+          }),
           body: JSON.stringify({
             type: backendType,
             fileName: file.name,
