@@ -76,6 +76,7 @@ export class ContractsService {
         objectKey,
         base64: payload.fileBase64,
         contentType: payload.contentType,
+        optimizeImagesToWebp: true,
       });
 
       const result = await this.prisma.withOrg(orgId, async (tx) => {
@@ -89,7 +90,7 @@ export class ContractsService {
             ownerName: payload.ownerName,
             concept: payload.concept,
             conceptOther: payload.conceptOther,
-            contentType: payload.contentType,
+            contentType: upload.contentType,
             sizeBytes: upload.sizeBytes,
             sha256: upload.sha256,
             uploadedByUserId: payload.uploadedByUserId,

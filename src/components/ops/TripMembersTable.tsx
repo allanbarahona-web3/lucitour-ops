@@ -92,12 +92,26 @@ const getApiBaseUrl = (): string => {
 
 const getOrgId = (): string => process.env.NEXT_PUBLIC_ORG_ID?.trim() || "lucitour";
 
+const ALLOWED_UPLOAD_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+const MAX_UPLOAD_FILE_SIZE_BYTES = 6 * 1024 * 1024;
+
 const buildApiHeaders = (apiBaseUrl: string, init?: HeadersInit): Headers => {
   const headers = new Headers(init);
   if (apiBaseUrl.includes(".ngrok-free.dev") || apiBaseUrl.includes(".ngrok-free.app")) {
     headers.set("ngrok-skip-browser-warning", "true");
   }
   return headers;
+};
+
+const formatBytes = (value: number): string => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  const power = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  const normalized = value / 1024 ** power;
+  const decimals = power === 0 ? 0 : 1;
+  return `${normalized.toFixed(decimals)} ${units[power]}`;
 };
 
 const fileToBase64 = async (file: File): Promise<string> => {
@@ -1186,6 +1200,42 @@ export const TripMembersTable = ({
       return member.documents;
     }
 
+    const filesArray = Array.from(files);
+    const validFiles: File[] = [];
+    const rejectedMessages: string[] = [];
+
+    for (const file of filesArray) {
+      const contentType = file.type || "application/octet-stream";
+
+      if (!ALLOWED_UPLOAD_MIME_TYPES.has(contentType)) {
+        rejectedMessages.push(`${file.name}: tipo no permitido (${contentType}).`);
+        continue;
+      }
+
+      if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
+        rejectedMessages.push(
+          `${file.name}: excede ${formatBytes(MAX_UPLOAD_FILE_SIZE_BYTES)} (tamano actual ${formatBytes(file.size)}).`,
+        );
+        continue;
+      }
+
+      validFiles.push(file);
+    }
+
+    if (rejectedMessages.length > 0) {
+      window.alert(
+        `Algunos archivos fueron rechazados:\n- ${rejectedMessages.join("\n- ")}\n\nFormatos permitidos: PDF, JPG, PNG.`,
+      );
+    }
+
+    if (validFiles.length === 0) {
+      setUploadFeedbackByMember((prev) => ({
+        ...prev,
+        [member.id]: "No hay archivos validos para subir (solo PDF/JPG/PNG, max 6 MB).",
+      }));
+      return member.documents;
+    }
+
     setUploadingByMember((prev) => ({
       ...prev,
       [member.id]: (prev[member.id] ?? 0) + 1,
@@ -1219,10 +1269,9 @@ export const TripMembersTable = ({
         : 0;
 
     const uploadedDocs: DocumentUpload[] = [];
-    const filesArray = Array.from(files);
 
-    for (let index = 0; index < filesArray.length; index += 1) {
-      const file = filesArray[index];
+    for (let index = 0; index < validFiles.length; index += 1) {
+      const file = validFiles[index];
       const backendType = resolveBackendDocumentType(type, index, existingIdCardCount);
 
       try {
@@ -1247,7 +1296,11 @@ export const TripMembersTable = ({
 
         if (!response.ok) {
           const payload = (await response.json().catch(() => null)) as { message?: string } | null;
-          throw new Error(payload?.message || "No se pudo subir el documento");
+          const statusMessage =
+            response.status === 413
+              ? "Archivo demasiado grande para el servidor"
+              : payload?.message || "No se pudo subir el documento";
+          throw new Error(statusMessage);
         }
 
         const created = (await response.json()) as {
@@ -3517,6 +3570,7 @@ export const TripMembersTable = ({
                                         className={inputClassName}
                                         type="file"
                                         multiple
+                                        accept="application/pdf,image/jpeg,image/png"
                                         disabled={step5Locked || Boolean(uploadingByMember[member.id])}
                                         onChange={(event) => {
                                           const files = event.target.files;
