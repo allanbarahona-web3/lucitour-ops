@@ -8,6 +8,7 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const expressApp = app.getHttpAdapter().getInstance();
+  const bodyLimit = process.env.HTTP_BODY_LIMIT?.trim() || '10mb';
 
   if (process.env.TRUST_PROXY === 'true') {
     expressApp.set('trust proxy', 1);
@@ -19,8 +20,8 @@ async function bootstrap() {
       crossOriginResourcePolicy: false,
     }),
   );
-  app.use(json({ limit: '3mb' }));
-  app.use(urlencoded({ extended: true, limit: '3mb' }));
+  app.use(json({ limit: bodyLimit }));
+  app.use(urlencoded({ extended: true, limit: bodyLimit }));
 
   app.enableCors({
     origin: process.env.CORS_ORIGIN?.split(',').map((origin) => origin.trim()) ?? true,
